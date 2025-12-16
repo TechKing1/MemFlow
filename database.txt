@@ -1,0 +1,62 @@
+DROP table cases;
+
+DROP TYPE IF EXISTS case_status;
+
+CREATE TYPE case_status AS ENUM ('queued', 'processing', 'completed', 'failed', 'archived');
+
+CREATE TABLE cases (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    status case_status NOT NULL DEFAULT 'queued',
+    priority SMALLINT NOT NULL DEFAULT 5 CHECK (priority BETWEEN 1 AND 10),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    metadata JSONB DEFAULT '{}'::jsonb
+    );
+
+CREATE INDEX idx_cases_status_created_at ON cases (status, created_at);
+
+CREATE TABLE case_files (
+    id BIGSERIAL PRIMARY KEY,
+    case_id BIGINT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    file_size BIGINT NOT NULL CHECK (file_size >= 0),
+    checksum VARCHAR(128),
+    mime_type TEXT,
+    stored_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (case_id, file_path)
+    );
+
+CREATE INDEX idx_case_files_case_id ON case_files (case_id);
+
+CREATE OR REPLACE FUNCTION trigger_set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at := now();
+    RETURN NEW;
+    END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_cases_updated_at ON cases;
+CREATE TRIGGER trg_cases_updated_at
+    BEFORE UPDATE ON cases
+    FOR EACH ROW
+    EXECUTE FUNCTION trigger_set_updated_at();
+
+INSERT INTO cases (name, description, status, priority, metadata)
+VALUES (
+    'Forensics Case - Laptop A',
+    'Captured memory image from Windows 10 machine for analysis.',
+    'queued',
+    3,
+    jsonb_build_object('source', 'endpoint', 'evidence_id', 'EV-1001')
+    );
+
+-- example file record (adjust case_id if needed)
+INSERT INTO case_files (case_id, file_path, file_size, checksum, mime_type)
+VALUES (1, 'data/cases/1/raw.raw', 1843200, 'd41d8cd98f00b204e9800998ecf8427e', 'application/octet-stream');
+
+SELECT * FROM cases
+WHERE status = 'queued'
+ORDER BY created_at;
