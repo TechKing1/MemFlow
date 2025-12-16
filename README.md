@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Memory Forensics Automation Tool
 
 A modern Flutter Desktop application for memory dump analysis and forensics automation.
@@ -170,3 +171,24 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+=======
+# MemFlow
+
+MemFlow is an automation-focused memory forensics framework designed to streamline
+DFIR workflows. It manages acquisition, case organization, memory dump handling,
+and automated analysis pipelines powered by Volatility.
+
+## Features
+
+- Case management system
+- Memory dump ingestion and organization
+- Volatility automation (pslist, netscan, dlllist, etc.)
+- Artifact extraction and structured output
+- CLI-driven workflow
+
+## Status
+Active development — core modules under construction.
+
+## License
+MIT License
+>>>>>>> d6209ec05745d015038bd208ea65ab52fa355c85
