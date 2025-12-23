@@ -11,6 +11,9 @@ A modern Flutter Desktop application for memory dump analysis and forensics auto
 - **Supported Formats**: `.raw`, `.mem`, `.vmem`, `.bin`
 - **Real-time Feedback**: Visual feedback on hover and file selection
 - **Light Theme**: Clean, professional UI with blue accent colors
+  
+## Status
+Active development — core modules under construction.
 
 ## Project Structure
 
@@ -168,27 +171,10 @@ A few resources to get you started if this is your first Flutter project:
 - [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
 - [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
-=======
-# MemFlow
-
-MemFlow is an automation-focused memory forensics framework designed to streamline
-DFIR workflows. It manages acquisition, case organization, memory dump handling,
-and automated analysis pipelines powered by Volatility.
-
-## Features
-
-- Case management system
-- Memory dump ingestion and organization
-- Volatility automation (pslist, netscan, dlllist, etc.)
-- Artifact extraction and structured output
-- CLI-driven workflow
-
-## Status
-Active development — core modules under construction.
-
 ## License
 MIT License
 >>>>>>> d6209ec05745d015038bd208ea65ab52fa355c85
+
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.
