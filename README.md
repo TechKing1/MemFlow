@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Memory Forensics Automation Tool
 
 A modern Flutter Desktop application for memory dump analysis and forensics automation.
