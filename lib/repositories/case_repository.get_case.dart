@@ -16,9 +16,11 @@ Future<CaseModel> getCase({
     if (response.statusCode >= 400) {
       throw Exception('Failed to fetch case: ${response.statusCode}');
     }
-    
+
     final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
-    return CaseModel.fromJson(jsonData);
+    // Backend returns {"case": {...}}, so we need to extract the nested object
+    final caseData = jsonData['case'] as Map<String, dynamic>;
+    return CaseModel.fromJson(caseData);
   } catch (e) {
     throw Exception('Failed to get case: $e');
   }

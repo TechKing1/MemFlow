@@ -16,8 +16,12 @@ Future<CaseStatus> getCaseStatus({
     if (response.statusCode >= 400) {
       throw Exception('Failed to fetch case status: ${response.statusCode}');
     }
-    
+
     final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
+    // Backend doesn't provide 'progress' field yet, so add a default value
+    if (!jsonData.containsKey('progress')) {
+      jsonData['progress'] = 0;
+    }
     return CaseStatus.fromJson(jsonData);
   } catch (e) {
     throw Exception('Failed to get case status: $e');

@@ -7,7 +7,7 @@ class CaseFile(db.Model):
     __tablename__ = 'case_files'
     
     id = db.Column(db.Integer, primary_key=True)
-    case_id = db.Column(db.Integer, db.ForeignKey('cases.id', ondelete='CASCADE'), nullable=False)
+    case_id = db.Column(db.Integer, db.ForeignKey('cases.id', ondelete='CASCADE'), nullable=False, index=True)
     file_path = db.Column(db.String(512), nullable=False)
     file_size = db.Column(db.BigInteger, nullable=False)
     checksum = db.Column(db.String(128), nullable=False)

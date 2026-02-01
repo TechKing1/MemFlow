@@ -19,7 +19,7 @@ class CaseModel extends Equatable {
 
   factory CaseModel.fromJson(Map<String, dynamic> json) {
     return CaseModel(
-      id: json['id'] as String,
+      id: json['id'].toString(),
       name: json['name'] as String,
       description: json['description'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
@@ -29,7 +29,14 @@ class CaseModel extends Equatable {
   }
 
   @override
-  List<Object?> get props => [id, name, description, createdAt, status, metadata];
+  List<Object?> get props => [
+    id,
+    name,
+    description,
+    createdAt,
+    status,
+    metadata,
+  ];
 }
 
 class CaseStatus extends Equatable {
@@ -51,14 +58,14 @@ class CaseStatus extends Equatable {
 
   factory CaseStatus.fromJson(Map<String, dynamic> json) {
     return CaseStatus(
-      caseId: json['case_id'] as String,
+      caseId: json['case_id'].toString(),
       status: json['status'] as String,
       progress: json['progress'] as int,
       currentTask: json['current_task'] as String?,
-      startedAt: json['started_at'] != null 
+      startedAt: json['started_at'] != null
           ? DateTime.parse(json['started_at'] as String)
           : null,
-      completedAt: json['completed_at'] != null 
+      completedAt: json['completed_at'] != null
           ? DateTime.parse(json['completed_at'] as String)
           : null,
     );
@@ -66,13 +73,13 @@ class CaseStatus extends Equatable {
 
   @override
   List<Object?> get props => [
-        caseId,
-        status,
-        progress,
-        currentTask,
-        startedAt,
-        completedAt,
-      ];
+    caseId,
+    status,
+    progress,
+    currentTask,
+    startedAt,
+    completedAt,
+  ];
 }
 
 class CaseReport {
@@ -88,7 +95,7 @@ class CaseReport {
 
   factory CaseReport.fromJson(Map<String, dynamic> json) {
     return CaseReport(
-      caseId: json['case_id'] as String,
+      caseId: json['case_id'].toString(),
       reportData: json['report_data'] as Map<String, dynamic>,
       generatedAt: DateTime.parse(json['generated_at'] as String),
     );

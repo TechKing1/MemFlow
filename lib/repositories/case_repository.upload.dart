@@ -12,11 +12,14 @@ Future<String> uploadCase({
 }) async {
   try {
     // Get file extension and check if it's supported
+    // Must match backend's ALLOWED_EXTENSIONS in app/routes/cases.py
     final fileExtension = file.path.split('.').last.toLowerCase();
-    final supportedExtensions = ['dmp', 'mem', 'raw', 'img', 'dd', 'vmem', 'hprof'];
-    
+    final supportedExtensions = ['raw', 'mem', 'vmem', 'bin'];
+
     if (!supportedExtensions.contains(fileExtension)) {
-      throw Exception('Unsupported file type. Please upload a memory dump file (.dmp, .mem, .raw, .img, .dd, .vmem, .hprof)');
+      throw Exception(
+        'Unsupported file type. Please upload a memory dump file (.raw, .mem, .vmem, .bin)',
+      );
     }
 
     final uri = Uri.parse('$baseUrl/api/cases/upload');
@@ -25,14 +28,14 @@ Future<String> uploadCase({
     // Add the file
     final fileStream = http.ByteStream(file.openRead());
     final fileLength = await file.length();
-    
+
     final multipartFile = http.MultipartFile(
       'file',
       fileStream,
       fileLength,
       filename: file.path.split(Platform.pathSeparator).last,
     );
-    
+
     request.files.add(multipartFile);
     request.fields['name'] = caseName;
 
@@ -46,16 +49,18 @@ Future<String> uploadCase({
     final responseBody = await response.stream.bytesToString();
 
     if (response.statusCode >= 400) {
-      throw Exception('Failed to upload case: ${response.statusCode} - $responseBody');
+      throw Exception(
+        'Failed to upload case: ${response.statusCode} - $responseBody',
+      );
     }
-    
+
     try {
       // Parse the JSON response
       final jsonResponse = jsonDecode(responseBody);
-      
+
       // Extract the case ID from the response
-      if (jsonResponse is Map && 
-          jsonResponse['case'] is Map && 
+      if (jsonResponse is Map &&
+          jsonResponse['case'] is Map &&
           jsonResponse['case']['id'] != null) {
         return jsonResponse['case']['id'].toString();
       } else {
