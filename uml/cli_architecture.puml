@@ -1,0 +1,165 @@
+@startuml MemFlow CLI Architecture
+
+!theme plain
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+
+title MemFlow CLI - Memory Analysis Engine Architecture
+
+skinparam package {
+    BackgroundColor #E8F5E9
+    BorderColor #388E3C
+}
+
+skinparam component {
+    BackgroundColor #FFFFFF
+    BorderColor #388E3C
+}
+
+package "CLI Entry Point" {
+    component [main] as Main
+}
+
+package "Analyzer Interface" {
+    component [MemflowAnalyzer] as Analyzer
+}
+
+package "Format Detection Module" {
+    component [detect_dump_format] as FormatFunc
+    component [FORMAT_SIGNATURES] as Sigs
+    component [DumpFormat] as DumpFormatEnum
+    component [FormatInfo] as FormatInfoClass
+}
+
+package "OS Detection Module" {
+    component [enhanced_os_detection] as OSFunc
+    component [Signature Sets] as OSSigs
+    component [OSType] as OSTypeEnum
+    component [calculate_signature_score] as ScoreCalc
+    component [generate_evidence] as EvidenceGen
+}
+
+package "Volatility Interface" {
+    component [find_volatility] as FindVol
+    component [run_vol] as RunVol
+    component [run_vol_parallel] as RunVolPar
+}
+
+package "Plugin Management" {
+    component [select_plugins] as SelectPlugins
+    component [WINDOWS_PLUGINS] as WinPlugins
+    component [LINUX_PLUGINS] as LinPlugins
+    component [MACOS_PLUGINS] as MacPlugins
+}
+
+package "Output Parsers" {
+    component [parse_windows_info] as ParseInfo
+    component [parse_windows_pslist] as ParsePS
+    component [parse_netscan] as ParseNet
+}
+
+package "Progress and Utilities" {
+    component [ProgressTracker] as ProgressTrackerClass
+    component [AnalysisProgress] as AnalysisProgressClass
+    component [ColorOutput] as Color
+    component [Utilities] as Utils
+}
+
+package "Error Handling" {
+    component [MemflowError] as MemflowErr
+    component [VolatilityNotFoundError] as VolNotFoundErr
+    component [UnsupportedFormatError] as UnsupportedErr
+}
+
+cloud "External Tool" {
+    component [Volatility3] as Vol3
+}
+
+' Main flow
+Main --> Analyzer : creates
+
+' Analyzer dependencies
+Analyzer --> FormatFunc : calls
+Analyzer --> OSFunc : calls
+Analyzer --> FindVol : uses
+Analyzer --> RunVolPar : executes
+Analyzer --> ProgressTrackerClass : tracks
+
+' Format detection flow
+FormatFunc --> Sigs : checks
+FormatFunc --> FormatInfoClass : returns
+FormatInfoClass --> DumpFormatEnum : contains
+
+' OS detection flow
+OSFunc --> OSSigs : scans
+OSFunc --> ScoreCalc : calculates
+OSFunc --> EvidenceGen : generates
+OSFunc --> OSTypeEnum : returns
+
+' Volatility flow
+FindVol --> Vol3 : locates
+RunVol --> Vol3 : executes
+RunVolPar --> RunVol : parallelizes
+RunVolPar --> SelectPlugins : gets plugins
+
+' Plugin selection
+SelectPlugins --> WinPlugins : for Windows
+SelectPlugins --> LinPlugins : for Linux
+SelectPlugins --> MacPlugins : for macOS
+SelectPlugins --> OSTypeEnum : based on
+
+' Parsing
+RunVol --> ParseInfo : output
+RunVol --> ParsePS : output
+RunVol --> ParseNet : output
+
+' Progress tracking
+ProgressTrackerClass --> AnalysisProgressClass : creates
+Analyzer --> Color : formats output
+Analyzer --> Utils : uses
+
+' Error handling
+Analyzer ..> MemflowErr : throws
+FindVol ..> VolNotFoundErr : throws
+FormatFunc ..> UnsupportedErr : throws
+
+note right of Analyzer
+    **Analysis Pipeline:**
+    1. Validate file exists
+    2. Detect format
+    3. Detect OS
+    4. Select plugins
+    5. Run Volatility (parallel)
+    6. Parse results
+    7. Generate report
+    8. Save JSON output
+end note
+
+note bottom of RunVolPar
+    **Parallel Execution:**
+    - Uses ThreadPoolExecutor
+    - Max 4 concurrent plugins
+    - Timeout: 300s per plugin
+    - Collects failures separately
+end note
+
+note bottom of Vol3
+    **Integration Method:**
+    - Subprocess execution
+    - Command-line interface
+    - JSON output parsing
+    - Error handling and retries
+end note
+
+legend right
+    **Constants:**
+    BUFFER_SIZE = 65536
+    HEURISTIC_SAMPLE_SIZE = 4MB
+    DEFAULT_TIMEOUT = 300s
+    MAX_WORKERS = 4
+    
+    **Supported File Extensions:**
+    .raw, .mem, .vmem, .bin
+endlegend
+
+@enduml

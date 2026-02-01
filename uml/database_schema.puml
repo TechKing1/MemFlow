@@ -1,0 +1,91 @@
+@startuml MemFlow Database Schema
+
+!theme plain
+skinparam linetype ortho
+skinparam backgroundColor #FFFFFF
+
+title MemFlow - Database Schema (Entity Relationship Diagram)
+
+' Entity styling
+skinparam class {
+    BackgroundColor #FFF3E0
+    BorderColor #F57C00
+    ArrowColor #424242
+}
+
+entity "cases" as cases {
+    * **id** : INTEGER <<PK>>
+    --
+    * name : VARCHAR(255)
+    description : TEXT
+    * status : VARCHAR(20)
+    * priority : SMALLINT
+    * created_at : TIMESTAMP
+    * updated_at : TIMESTAMP
+    * metadata : JSONB
+    --
+    **Status values:**
+    - queued
+    - processing
+    - completed
+    - failed
+    --
+    **Priority range:** 1-10
+}
+
+entity "case_files" as case_files {
+    * **id** : INTEGER <<PK>>
+    --
+    * **case_id** : INTEGER <<FK>>
+    * file_path : VARCHAR(512)
+    * file_size : BIGINT
+    * checksum : VARCHAR(128)
+    mime_type : VARCHAR(100)
+    * stored_at : TIMESTAMP
+    report_path : VARCHAR(512)
+    notes : TEXT
+}
+
+' Relationships
+cases ||--o{ case_files : "has many"
+
+note right of cases
+    **Case Metadata (JSONB)**
+    {
+        "original_filename": "memory.dmp",
+        "os_detected": "Windows",
+        "format_detected": "raw",
+        "analysis_level": "essential",
+        "plugins_executed": [...],
+        "analysis_duration": 120.5
+    }
+end note
+
+note right of case_files
+    **File Checksums**
+    - SHA-256 hash for integrity
+    - Calculated on upload
+    - Used for deduplication
+    
+    **Report Path**
+    - JSON format analysis results
+    - Stored in data/case_{id}/
+end note
+
+note bottom of cases
+    **Indexes:**
+    - PRIMARY KEY (id)
+    - INDEX (status)
+    - INDEX (created_at)
+    - INDEX (priority)
+end note
+
+note bottom of case_files
+    **Indexes:**
+    - PRIMARY KEY (id)
+    - FOREIGN KEY (case_id)
+    - INDEX (checksum)
+    - INDEX (stored_at)
+end note
+
+@enduml

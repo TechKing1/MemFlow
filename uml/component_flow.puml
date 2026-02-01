@@ -1,0 +1,138 @@
+@startuml MemFlow Component Diagram
+
+!theme plain
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+
+title MemFlow - Component Interaction Flow
+
+' Define components with colors
+skinparam component {
+    BackgroundColor<<UI>> #E3F2FD
+    BorderColor<<UI>> #1976D2
+    BackgroundColor<<API>> #FFF3E0
+    BorderColor<<API>> #F57C00
+    BackgroundColor<<Engine>> #E8F5E9
+    BorderColor<<Engine>> #388E3C
+    BackgroundColor<<Storage>> #F3E5F5
+    BorderColor<<Storage>> #7B1FA2
+}
+
+actor User
+
+package "Frontend (Flutter)" <<UI>> {
+    component [Landing Screen] as Landing
+    component [Dashboard Screen] as Dashboard
+    component [Operations Screen] as Operations
+    component [Case Repository] as FrontRepo
+}
+
+package "Backend (Flask)" <<API>> {
+    component [Upload API] as UploadAPI
+    component [Status API] as StatusAPI
+    component [Report API] as ReportAPI
+    component [Case Controller] as CaseCtrl
+    component [File Handler] as FileHandler
+}
+
+package "Analysis Engine (CLI)" <<Engine>> {
+    component [Memflow Analyzer] as Analyzer
+    component [Format Detector] as FormatDet
+    component [OS Detector] as OSDet
+    component [Volatility Runner] as VolRunner
+    component [Report Generator] as ReportGen
+}
+
+database "PostgreSQL" <<Storage>> {
+    component [Cases Table] as CasesDB
+    component [Files Table] as FilesDB
+}
+
+storage "File System" <<Storage>> {
+    folder [Memory Dumps] as Dumps
+    folder [Analysis Reports] as Reports
+}
+
+cloud "External" {
+    component [Volatility3] as Vol3
+}
+
+' User interactions
+User --> Landing : 1. Access application
+Landing --> Dashboard : 2. Navigate to dashboard
+Dashboard --> FrontRepo : 3. Upload memory dump
+
+' Upload flow
+FrontRepo --> UploadAPI : 4. POST file + metadata\n(multipart/form-data)
+UploadAPI --> CaseCtrl : 5. Create case
+CaseCtrl --> CasesDB : 6. Store case metadata
+CaseCtrl --> FileHandler : 7. Process file
+FileHandler --> Dumps : 8. Save memory dump
+FileHandler --> FilesDB : 9. Store file record\n(path, checksum, size)
+
+' Analysis flow
+CaseCtrl ..> Analyzer : 10. Trigger analysis\n(async/queued)
+Analyzer --> FormatDet : 11. Detect dump format
+FormatDet --> Dumps : 12. Read file header
+Analyzer --> OSDet : 13. Detect OS type
+OSDet --> Dumps : 14. Scan for signatures
+Analyzer --> VolRunner : 15. Run plugins
+VolRunner --> Vol3 : 16. Execute volatility\ncommands
+Vol3 --> Dumps : 17. Analyze memory
+Vol3 --> VolRunner : 18. Return results
+VolRunner --> ReportGen : 19. Parse output
+ReportGen --> Reports : 20. Generate JSON report
+ReportGen --> CaseCtrl : 21. Update case status
+
+' Status polling
+Dashboard --> Operations : 22. Navigate to operations
+Operations --> FrontRepo : 23. Poll for status
+FrontRepo --> StatusAPI : 24. GET /status
+StatusAPI --> CasesDB : 25. Query case status
+CasesDB --> StatusAPI : 26. Return status
+StatusAPI --> FrontRepo : 27. JSON response
+FrontRepo --> Operations : 28. Update UI
+
+' Report retrieval
+Operations --> FrontRepo : 29. Request report
+FrontRepo --> ReportAPI : 30. GET /report
+ReportAPI --> Reports : 31. Read report file
+Reports --> ReportAPI : 32. Report data
+ReportAPI --> FrontRepo : 33. JSON response
+FrontRepo --> Operations : 34. Display results
+
+note right of UploadAPI
+    **Upload Endpoint**
+    - Validates file type
+    - Generates unique case ID
+    - Calculates SHA-256 checksum
+    - Returns case ID for tracking
+end note
+
+note right of Analyzer
+    **Analysis Modes**
+    - Quick: Format + OS detection
+    - Essential: Basic plugins
+    - Standard: Network analysis
+    - Advanced: Malware detection
+    - Full: Complete analysis
+end note
+
+note bottom of Vol3
+    **Volatility3 Plugins**
+    Windows: pslist, netscan, malfind
+    Linux: bash, pslist, sockstat
+    macOS: pslist, netstat, lsmod
+end note
+
+legend right
+    |= Flow Type |= Description |
+    | Solid line --> | Synchronous call |
+    | Dotted line ..> | Asynchronous/queued |
+    
+    **Status Values:**
+    queued → processing → completed/failed
+endlegend
+
+@enduml

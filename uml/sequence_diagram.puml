@@ -1,0 +1,213 @@
+@startuml MemFlow Upload and Analysis Sequence
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam sequenceMessageAlign center
+
+title MemFlow - Upload and Analysis Sequence Diagram
+
+actor User
+participant "Landing\nScreen" as Landing
+participant "Dashboard\nScreen" as Dashboard
+participant "Case\nRepository" as Repo
+participant "Upload\nAPI" as API
+participant "Case\nController" as Controller
+participant "File\nHandler" as FileHandler
+database "PostgreSQL" as DB
+participant "File\nSystem" as FS
+participant "Memflow\nAnalyzer" as Analyzer
+participant "Format\nDetector" as Format
+participant "OS\nDetector" as OSDetect
+participant "Volatility\nRunner" as VolRunner
+participant "Volatility3" as Vol3
+participant "Report\nGenerator" as Reporter
+
+== User Upload Flow ==
+
+User -> Landing: Open application
+activate Landing
+Landing -> Dashboard: Navigate to dashboard
+deactivate Landing
+activate Dashboard
+
+User -> Dashboard: Select memory dump file\n(drag and drop or browse)
+Dashboard -> Dashboard: Validate file extension\n(.raw, .mem, .vmem, .bin)
+
+Dashboard -> Repo: uploadCase(file, name, description)
+activate Repo
+
+Repo -> API: POST /api/cases/upload\n(multipart/form-data)
+activate API
+
+API -> API: Validate file type
+API -> API: Validate case name
+
+API -> Controller: create_case(file, metadata)
+activate Controller
+
+Controller -> DB: INSERT INTO cases\n(name, description, status='queued')
+activate DB
+DB --> Controller: case_id
+deactivate DB
+
+Controller -> FileHandler: save_file(file, case_id)
+activate FileHandler
+
+FileHandler -> FS: Create directory\ndata/case_{id}/
+activate FS
+FS --> FileHandler: directory created
+deactivate FS
+
+FileHandler -> FS: Save file as raw.mem
+activate FS
+FS --> FileHandler: file saved
+deactivate FS
+
+FileHandler -> FileHandler: Calculate SHA-256 checksum
+FileHandler -> DB: INSERT INTO case_files\n(path, size, checksum)
+activate DB
+DB --> FileHandler: file_id
+deactivate DB
+
+FileHandler --> Controller: file_path, checksum
+deactivate FileHandler
+
+Controller --> API: case object
+deactivate Controller
+
+API --> Repo: 201 Created\n{case_id, status}
+deactivate API
+
+Repo --> Dashboard: case_id
+deactivate Repo
+
+Dashboard -> Dashboard: Navigate to Operations screen
+Dashboard -> User: Show "Upload successful"
+deactivate Dashboard
+
+== Background Analysis Flow ==
+
+note over Controller, Analyzer
+    Analysis triggered asynchronously
+    (could be via queue/worker)
+end note
+
+Controller -> Analyzer: analyze(dump_path, level='essential')
+activate Analyzer
+
+Analyzer -> DB: UPDATE cases\nSET status='processing'
+activate DB
+DB --> Analyzer: updated
+deactivate DB
+
+Analyzer -> Format: detect_dump_format(path)
+activate Format
+Format -> FS: Read file header (512 bytes)
+activate FS
+FS --> Format: header data
+deactivate FS
+Format -> Format: Check magic bytes\nagainst signatures
+Format --> Analyzer: FormatInfo\n(type, confidence, evidence)
+deactivate Format
+
+Analyzer -> OSDetect: enhanced_os_detection(path)
+activate OSDetect
+OSDetect -> FS: Read sample (4MB)
+activate FS
+FS --> OSDetect: sample data
+deactivate FS
+OSDetect -> OSDetect: Scan for OS signatures\n(Windows/Linux/macOS)
+OSDetect -> OSDetect: Calculate confidence scores
+OSDetect --> Analyzer: OSType, evidence, confidence
+deactivate OSDetect
+
+Analyzer -> Analyzer: select_plugins(os_type, level)
+
+Analyzer -> VolRunner: run_vol_parallel(plugins, dump_path)
+activate VolRunner
+
+loop For each plugin (parallel, max 4 workers)
+    VolRunner -> Vol3: Execute plugin\nvol -f dump.mem {plugin}
+    activate Vol3
+    Vol3 -> FS: Analyze memory dump
+    activate FS
+    FS --> Vol3: memory data
+    deactivate FS
+    Vol3 -> Vol3: Process memory structures
+    Vol3 --> VolRunner: Plugin output (text)
+    deactivate Vol3
+end
+
+VolRunner -> VolRunner: Parse all outputs
+VolRunner --> Analyzer: Parsed results dict
+deactivate VolRunner
+
+Analyzer -> Reporter: generate_report(results)
+activate Reporter
+Reporter -> Reporter: Format analysis data
+Reporter -> Reporter: Create JSON structure
+Reporter -> FS: Save report.json
+activate FS
+FS --> Reporter: saved
+deactivate FS
+Reporter --> Analyzer: report_path
+deactivate Reporter
+
+Analyzer -> DB: UPDATE cases\nSET status='completed',\nmetadata={analysis_results}
+activate DB
+DB --> Analyzer: updated
+deactivate DB
+
+Analyzer -> DB: UPDATE case_files\nSET report_path='...'
+activate DB
+DB --> Analyzer: updated
+deactivate DB
+
+Analyzer --> Controller: Analysis complete
+deactivate Analyzer
+
+== Status Polling and Report Retrieval ==
+
+note over User, Dashboard
+    User polls for status updates
+    while analysis is running
+end note
+
+activate Dashboard
+Dashboard -> Repo: getCaseStatus(case_id)
+activate Repo
+Repo -> API: GET /api/cases/{id}/status
+activate API
+API -> DB: SELECT status, updated_at\nFROM cases WHERE id={id}
+activate DB
+DB --> API: status data
+deactivate DB
+API --> Repo: {status, updated_at}
+deactivate API
+Repo --> Dashboard: CaseStatus
+deactivate Repo
+Dashboard -> User: Update progress UI
+deactivate Dashboard
+
+note over Dashboard
+    When status = 'completed'
+    fetch the report
+end note
+
+activate Dashboard
+Dashboard -> Repo: getCaseReport(case_id)
+activate Repo
+Repo -> API: GET /api/cases/{id}/report
+activate API
+API -> FS: Read report.json
+activate FS
+FS --> API: report data
+deactivate FS
+API --> Repo: {report_data}
+deactivate API
+Repo --> Dashboard: CaseReport
+deactivate Repo
+Dashboard -> User: Display analysis results
+deactivate Dashboard
+
+@enduml

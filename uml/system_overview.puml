@@ -1,0 +1,303 @@
+@startuml MemFlow System Overview
+
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+skinparam defaultFontName Arial
+skinparam shadowing false
+
+' Color scheme
+skinparam component {
+    BackgroundColor<<Frontend>> #E3F2FD
+    BorderColor<<Frontend>> #1976D2
+    BackgroundColor<<Backend>> #FFF3E0
+    BorderColor<<Backend>> #F57C00
+    BackgroundColor<<CLI>> #E8F5E9
+    BorderColor<<CLI>> #388E3C
+    BackgroundColor<<Database>> #F3E5F5
+    BorderColor<<Database>> #7B1FA2
+    BackgroundColor<<External>> #FFEBEE
+    BorderColor<<External>> #C62828
+}
+
+title MemFlow - Memory Forensics Automation System Architecture
+
+' ============================================
+' FRONTEND LAYER (Flutter Desktop Application)
+' ============================================
+package "Flutter Desktop Application" <<Frontend>> {
+    
+    component "main.dart" as MainApp <<Frontend>>
+    
+    package "Screens" {
+        component [LandingScreen] <<Frontend>>
+        component [DashboardScreen] <<Frontend>>
+        component [OperationsScreen] <<Frontend>>
+    }
+    
+    package "ViewModels" {
+        component [LandingViewModel] <<Frontend>>
+        component [DashboardViewModel] <<Frontend>>
+        component [OperationsViewModel] <<Frontend>>
+    }
+    
+    package "Repositories" {
+        component [CaseRepository] <<Frontend>>
+    }
+    
+    package "Models" {
+        component [CaseModel] <<Frontend>>
+        component [CaseStatus] <<Frontend>>
+        component [CaseReport] <<Frontend>>
+    }
+    
+    package "Theme" {
+        component [AppTheme] <<Frontend>>
+    }
+}
+
+' ============================================
+' BACKEND LAYER (Flask REST API)
+' ============================================
+package "Flask Backend API" <<Backend>> {
+    
+    component "run.py" as RunPy <<Backend>>
+    
+    package "app" {
+        component "__init__.py" as AppInit <<Backend>>
+        
+        package "routes" {
+            component "cases_bp\n/api/cases/upload\n/api/cases/{id}\n/api/cases/{id}/status\n/api/cases/{id}/report" as cases_bp <<Backend>>
+        }
+        
+        package "models" {
+            component [Case] <<Backend>>
+            component [CaseFile] <<Backend>>
+        }
+        
+        package "services" {
+            component [FileService] <<Backend>>
+        }
+        
+        package "utils" {
+            component [Validators] <<Backend>>
+        }
+        
+        package "extensions" {
+            component [db] <<Backend>>
+            component [migrate] <<Backend>>
+        }
+    }
+    
+    component "config.py" as Config <<Backend>>
+}
+
+' ============================================
+' CLI TOOL (Memory Analysis Engine)
+' ============================================
+package "CLI Tool - memflow-cli_v2.py" <<CLI>> {
+    
+    component [MemflowAnalyzer] <<CLI>>
+    
+    package "Core Analysis" {
+        component [FormatDetection] <<CLI>>
+        component [OSDetection] <<CLI>>
+        component [VolatilityInterface] <<CLI>>
+        component [PluginManager] <<CLI>>
+    }
+    
+    package "Parsers" {
+        component [OutputParsers] <<CLI>>
+    }
+    
+    package "Utilities" {
+        component [ProgressTracker] <<CLI>>
+        component [ColorOutput] <<CLI>>
+    }
+    
+    package "Data Models" {
+        component [AnalysisProgress] <<CLI>>
+        component [FormatInfo] <<CLI>>
+    }
+}
+
+' ============================================
+' DATABASE
+' ============================================
+database "PostgreSQL Database" <<Database>> {
+    component [cases_table] <<Database>>
+    component [case_files_table] <<Database>>
+}
+
+' ============================================
+' EXTERNAL TOOLS
+' ============================================
+package "External Tools" <<External>> {
+    component [Volatility3] <<External>>
+}
+
+' ============================================
+' FILE SYSTEM
+' ============================================
+storage "File System" {
+    folder "data/" {
+        folder "case_{id}/" {
+            file "raw.mem"
+            file "report.json"
+        }
+    }
+}
+
+' ============================================
+' RELATIONSHIPS - Frontend
+' ============================================
+MainApp --> LandingScreen : routes
+MainApp --> DashboardScreen : routes
+MainApp --> OperationsScreen : routes
+MainApp --> AppTheme : uses
+MainApp --> CaseRepository : provides
+
+LandingScreen --> LandingViewModel : uses
+DashboardScreen --> DashboardViewModel : uses
+OperationsScreen --> OperationsViewModel : uses
+
+LandingViewModel --> CaseRepository : calls
+DashboardViewModel --> CaseRepository : calls
+OperationsViewModel --> CaseRepository : calls
+
+CaseRepository --> CaseModel : returns
+CaseRepository --> CaseStatus : returns
+CaseRepository --> CaseReport : returns
+
+' ============================================
+' RELATIONSHIPS - Frontend to Backend
+' ============================================
+CaseRepository -down-> cases_bp : HTTP REST API\n(JSON)
+
+' ============================================
+' RELATIONSHIPS - Backend Internal
+' ============================================
+RunPy --> AppInit : imports
+AppInit --> cases_bp : registers
+AppInit --> db : initializes
+AppInit --> migrate : initializes
+AppInit --> Config : loads
+
+cases_bp --> Case : CRUD operations
+cases_bp --> CaseFile : CRUD operations
+cases_bp --> FileService : uses
+cases_bp --> Validators : validates
+
+Case --> db : extends Model
+CaseFile --> db : extends Model
+
+Case "1" -- "many" CaseFile : has
+
+' ============================================
+' RELATIONSHIPS - Backend to Database
+' ============================================
+db -down-> cases_table : ORM mapping
+db -down-> case_files_table : ORM mapping
+
+cases_table "1" -- "many" case_files_table : FK relationship
+
+' ============================================
+' RELATIONSHIPS - Backend to File System
+' ============================================
+cases_bp -down-> "File System" : stores uploads
+
+' ============================================
+' RELATIONSHIPS - Backend to CLI
+' ============================================
+cases_bp ..> MemflowAnalyzer : invokes for\nanalysis\n(future integration)
+
+' ============================================
+' RELATIONSHIPS - CLI Internal
+' ============================================
+MemflowAnalyzer --> FormatDetection : uses
+MemflowAnalyzer --> OSDetection : uses
+MemflowAnalyzer --> VolatilityInterface : uses
+MemflowAnalyzer --> ProgressTracker : uses
+
+VolatilityInterface --> PluginManager : selects plugins
+VolatilityInterface --> OutputParsers : parses results
+VolatilityInterface --> Volatility3 : executes
+
+ProgressTracker --> AnalysisProgress : creates
+FormatDetection --> FormatInfo : creates
+
+ColorOutput --> MemflowAnalyzer : formats output
+
+' ============================================
+' RELATIONSHIPS - CLI to External
+' ============================================
+VolatilityInterface -down-> Volatility3 : subprocess calls
+
+' ============================================
+' RELATIONSHIPS - CLI to File System
+' ============================================
+MemflowAnalyzer --> "File System" : reads memory dumps
+MemflowAnalyzer --> "File System" : writes reports
+
+' ============================================
+' NOTES
+' ============================================
+note right of "Flutter Desktop Application"
+    **Frontend Layer**
+    - Cross-platform desktop UI
+    - MVVM architecture
+    - Provider state management
+    - File upload and drag-drop
+    - Real-time status updates
+end note
+
+note right of "Flask Backend API"
+    **Backend Layer**
+    - RESTful API endpoints
+    - SQLAlchemy ORM
+    - File upload handling
+    - Case management
+    - Database migrations
+end note
+
+note right of "CLI Tool - memflow-cli_v2.py"
+    **Analysis Engine**
+    - Memory dump format detection
+    - OS detection (Windows/Linux/macOS)
+    - Volatility3 integration
+    - Parallel plugin execution
+    - Progress tracking
+    - JSON report generation
+end note
+
+note bottom of "PostgreSQL Database"
+    **Data Persistence**
+    - Case metadata
+    - File tracking
+    - Analysis results
+    - JSONB for flexible metadata
+end note
+
+note bottom of Volatility3
+    **External Dependency**
+    - Industry-standard tool
+    - Plugin-based architecture
+    - Supports multiple OS types
+end note
+
+' ============================================
+' LEGEND
+' ============================================
+legend right
+    |<#E3F2FD> Frontend | Flutter Desktop Application |
+    |<#FFF3E0> Backend | Flask REST API |
+    |<#E8F5E9> CLI | Memory Analysis CLI Tool |
+    |<#F3E5F5> Database | PostgreSQL Database |
+    |<#FFEBEE> External | External Tools/Libraries |
+    
+    **Communication Patterns:**
+    --> : Direct dependency/call
+    ..> : Async/future integration
+    -- : Data relationship
+endlegend
+
+@enduml
