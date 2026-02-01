@@ -4,17 +4,21 @@
 skinparam backgroundColor #FFFFFF
 skinparam sequenceMessageAlign center
 
-title MemFlow - Upload and Analysis Sequence Diagram
+title MemFlow - Upload and Analysis Sequence Diagram (Updated with Async Queue)
 
 actor User
-participant "Landing\nScreen" as Landing
+participant "Login\nScreen" as Login
 participant "Dashboard\nScreen" as Dashboard
+participant "Upload\nScreen" as Upload
 participant "Case\nRepository" as Repo
 participant "Upload\nAPI" as API
 participant "Case\nController" as Controller
 participant "File\nHandler" as FileHandler
 database "PostgreSQL" as DB
 participant "File\nSystem" as FS
+participant "Redis\nQueue" as Queue
+participant "RQ\nWorker" as Worker
+participant "analyze_memory_dump\nTask" as Task
 participant "Memflow\nAnalyzer" as Analyzer
 participant "Format\nDetector" as Format
 participant "OS\nDetector" as OSDetect
@@ -22,18 +26,26 @@ participant "Volatility\nRunner" as VolRunner
 participant "Volatility3" as Vol3
 participant "Report\nGenerator" as Reporter
 
-== User Upload Flow ==
+== User Authentication ==
 
-User -> Landing: Open application
-activate Landing
-Landing -> Dashboard: Navigate to dashboard
-deactivate Landing
+User -> Login: Open application
+activate Login
+Login -> Login: Enter credentials
+Login -> Dashboard: Navigate after login
+deactivate Login
 activate Dashboard
 
-User -> Dashboard: Select memory dump file\n(drag and drop or browse)
-Dashboard -> Dashboard: Validate file extension\n(.raw, .mem, .vmem, .bin)
+== User Upload Flow ==
 
-Dashboard -> Repo: uploadCase(file, name, description)
+User -> Dashboard: Click "Upload Case"
+Dashboard -> Upload: Navigate to upload screen
+deactivate Dashboard
+activate Upload
+
+User -> Upload: Select memory dump file\n(drag and drop or browse)
+Upload -> Upload: Validate file extension\n(.raw, .mem, .vmem, .bin)
+
+Upload -> Repo: uploadCase(file, name, description)
 activate Repo
 
 Repo -> API: POST /api/cases/upload\n(multipart/form-data)
@@ -72,32 +84,56 @@ deactivate DB
 FileHandler --> Controller: file_path, checksum
 deactivate FileHandler
 
-Controller --> API: case object
+== Async Job Queuing (NEW) ==
+
+Controller -> Queue: enqueue(analyze_memory_dump, case_id)
+activate Queue
+Queue -> Queue: Store job in Redis
+Queue --> Controller: job_id
+deactivate Queue
+
+Controller --> API: case object + job_id
 deactivate Controller
 
-API --> Repo: 201 Created\n{case_id, status}
+API --> Repo: 201 Created\n{case_id, status='queued', job_id}
 deactivate API
 
-Repo --> Dashboard: case_id
+Repo --> Upload: case_id
 deactivate Repo
 
-Dashboard -> Dashboard: Navigate to Operations screen
-Dashboard -> User: Show "Upload successful"
+Upload -> Dashboard: Navigate to dashboard
+deactivate Upload
+activate Dashboard
+Dashboard -> User: Show "Upload successful\nAnalysis queued"
 deactivate Dashboard
 
-== Background Analysis Flow ==
+== Background Worker Processing (NEW) ==
 
-note over Controller, Analyzer
-    Analysis triggered asynchronously
-    (could be via queue/worker)
+note over Worker, Queue
+    Worker continuously polls Redis queue
+    for new jobs to process
 end note
 
-Controller -> Analyzer: analyze(dump_path, level='essential')
+Worker -> Queue: Poll for jobs
+activate Worker
+activate Queue
+Queue --> Worker: analyze_memory_dump job
+deactivate Queue
+
+Worker -> Task: Execute task(case_id)
+activate Task
+
+Task -> DB: UPDATE cases\nSET status='processing'
+activate DB
+DB --> Task: updated
+deactivate DB
+
+Task -> Analyzer: analyze(dump_path, level='essential')
 activate Analyzer
 
-Analyzer -> DB: UPDATE cases\nSET status='processing'
+Analyzer -> DB: Verify case exists
 activate DB
-DB --> Analyzer: updated
+DB --> Analyzer: case data
 deactivate DB
 
 Analyzer -> Format: detect_dump_format(path)
@@ -153,18 +189,24 @@ deactivate FS
 Reporter --> Analyzer: report_path
 deactivate Reporter
 
-Analyzer -> DB: UPDATE cases\nSET status='completed',\nmetadata={analysis_results}
-activate DB
-DB --> Analyzer: updated
-deactivate DB
-
-Analyzer -> DB: UPDATE case_files\nSET report_path='...'
-activate DB
-DB --> Analyzer: updated
-deactivate DB
-
-Analyzer --> Controller: Analysis complete
+Analyzer --> Task: Analysis complete
 deactivate Analyzer
+
+Task -> DB: UPDATE cases\nSET status='completed',\nmetadata={analysis_results}
+activate DB
+DB --> Task: updated
+deactivate DB
+
+Task -> DB: UPDATE case_files\nSET report_path='...'
+activate DB
+DB --> Task: updated
+deactivate DB
+
+Task --> Worker: Task completed successfully
+deactivate Task
+
+Worker -> Worker: Mark job as finished
+deactivate Worker
 
 == Status Polling and Report Retrieval ==
 

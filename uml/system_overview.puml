@@ -17,9 +17,11 @@ skinparam component {
     BorderColor<<Database>> #7B1FA2
     BackgroundColor<<External>> #FFEBEE
     BorderColor<<External>> #C62828
+    BackgroundColor<<Worker>> #FFF9C4
+    BorderColor<<Worker>> #F57F17
 }
 
-title MemFlow - Memory Forensics Automation System Architecture
+title MemFlow - Memory Forensics Automation System Architecture (Updated)
 
 ' ============================================
 ' FRONTEND LAYER (Flutter Desktop Application)
@@ -29,9 +31,13 @@ package "Flutter Desktop Application" <<Frontend>> {
     component "main.dart" as MainApp <<Frontend>>
     
     package "Screens" {
-        component [LandingScreen] <<Frontend>>
-        component [DashboardScreen] <<Frontend>>
+        component [LoginScreen] <<Frontend>>
+        component [NewDashboardScreen] <<Frontend>>
+        component [UploadCaseScreen] <<Frontend>>
         component [OperationsScreen] <<Frontend>>
+        component [ReportsScreen] <<Frontend>>
+        component [SettingsScreen] <<Frontend>>
+        component [HelpScreen] <<Frontend>>
     }
     
     package "ViewModels" {
@@ -40,14 +46,28 @@ package "Flutter Desktop Application" <<Frontend>> {
         component [OperationsViewModel] <<Frontend>>
     }
     
+    package "API Routes" {
+        component [DashboardAPIRoutes] <<Frontend>>
+        component [UploadAPIRoutes] <<Frontend>>
+        component [ReportsAPIRoutes] <<Frontend>>
+        component [SettingsAPIRoutes] <<Frontend>>
+    }
+    
     package "Repositories" {
         component [CaseRepository] <<Frontend>>
     }
     
     package "Models" {
         component [CaseModel] <<Frontend>>
-        component [CaseStatus] <<Frontend>>
-        component [CaseReport] <<Frontend>>
+    }
+    
+    package "Common Widgets" {
+        component [AppSidebar] <<Frontend>>
+        component [AppTopBar] <<Frontend>>
+    }
+    
+    package "Utils" {
+        component [PageTransitions] <<Frontend>>
     }
     
     package "Theme" {
@@ -66,7 +86,7 @@ package "Flask Backend API" <<Backend>> {
         component "__init__.py" as AppInit <<Backend>>
         
         package "routes" {
-            component "cases_bp\n/api/cases/upload\n/api/cases/{id}\n/api/cases/{id}/status\n/api/cases/{id}/report" as cases_bp <<Backend>>
+            component "cases_bp" as cases_bp <<Backend>>
         }
         
         package "models" {
@@ -85,10 +105,23 @@ package "Flask Backend API" <<Backend>> {
         package "extensions" {
             component [db] <<Backend>>
             component [migrate] <<Backend>>
+            component [redis_client] <<Backend>>
+            component [task_queue] <<Backend>>
+        }
+        
+        package "tasks" {
+            component [analyze_memory_dump] <<Backend>>
         }
     }
     
     component "config.py" as Config <<Backend>>
+}
+
+' ============================================
+' WORKER PROCESS (RQ Worker)
+' ============================================
+package "Background Worker" <<Worker>> {
+    component "worker.py" as Worker <<Worker>>
 }
 
 ' ============================================
@@ -129,10 +162,11 @@ database "PostgreSQL Database" <<Database>> {
 }
 
 ' ============================================
-' EXTERNAL TOOLS
+' EXTERNAL TOOLS & SERVICES
 ' ============================================
-package "External Tools" <<External>> {
+package "External Tools & Services" <<External>> {
     component [Volatility3] <<External>>
+    component [Redis] <<External>>
 }
 
 ' ============================================
@@ -148,30 +182,61 @@ storage "File System" {
 }
 
 ' ============================================
-' RELATIONSHIPS - Frontend
+' RELATIONSHIPS - Frontend Internal
 ' ============================================
-MainApp --> LandingScreen : routes
-MainApp --> DashboardScreen : routes
+MainApp --> LoginScreen : routes
+MainApp --> NewDashboardScreen : routes
+MainApp --> UploadCaseScreen : routes
 MainApp --> OperationsScreen : routes
+MainApp --> ReportsScreen : routes
+MainApp --> SettingsScreen : routes
+MainApp --> HelpScreen : routes
+MainApp --> PageTransitions : uses
 MainApp --> AppTheme : uses
-MainApp --> CaseRepository : provides
 
-LandingScreen --> LandingViewModel : uses
-DashboardScreen --> DashboardViewModel : uses
+NewDashboardScreen --> AppSidebar : uses
+NewDashboardScreen --> AppTopBar : uses
+NewDashboardScreen --> DashboardViewModel : uses
+
+UploadCaseScreen --> AppSidebar : uses
+UploadCaseScreen --> AppTopBar : uses
+
+OperationsScreen --> AppSidebar : uses
+OperationsScreen --> AppTopBar : uses
 OperationsScreen --> OperationsViewModel : uses
 
-LandingViewModel --> CaseRepository : calls
-DashboardViewModel --> CaseRepository : calls
-OperationsViewModel --> CaseRepository : calls
+ReportsScreen --> AppSidebar : uses
+ReportsScreen --> AppTopBar : uses
+
+SettingsScreen --> AppSidebar : uses
+SettingsScreen --> AppTopBar : uses
+
+HelpScreen --> AppSidebar : uses
+HelpScreen --> AppTopBar : uses
+
+' ============================================
+' RELATIONSHIPS - Frontend to API Routes
+' ============================================
+DashboardViewModel --> DashboardAPIRoutes : calls
+DashboardViewModel --> CaseRepository : uses
+
+UploadCaseScreen --> UploadAPIRoutes : calls
+UploadAPIRoutes --> CaseRepository : uses
+
+ReportsScreen --> ReportsAPIRoutes : calls
+ReportsAPIRoutes --> CaseRepository : uses
+
+SettingsScreen --> SettingsAPIRoutes : calls
 
 CaseRepository --> CaseModel : returns
-CaseRepository --> CaseStatus : returns
-CaseRepository --> CaseReport : returns
 
 ' ============================================
 ' RELATIONSHIPS - Frontend to Backend
 ' ============================================
-CaseRepository -down-> cases_bp : HTTP REST API\n(JSON)
+DashboardAPIRoutes -down-> cases_bp : HTTP REST API
+UploadAPIRoutes -down-> cases_bp : HTTP REST API
+ReportsAPIRoutes -down-> cases_bp : HTTP REST API
+CaseRepository -down-> cases_bp : HTTP REST API
 
 ' ============================================
 ' RELATIONSHIPS - Backend Internal
@@ -180,16 +245,20 @@ RunPy --> AppInit : imports
 AppInit --> cases_bp : registers
 AppInit --> db : initializes
 AppInit --> migrate : initializes
+AppInit --> redis_client : initializes
 AppInit --> Config : loads
 
 cases_bp --> Case : CRUD operations
 cases_bp --> CaseFile : CRUD operations
 cases_bp --> FileService : uses
 cases_bp --> Validators : validates
+cases_bp --> task_queue : enqueues jobs
+
+redis_client --> task_queue : creates
+task_queue --> analyze_memory_dump : queues
 
 Case --> db : extends Model
 CaseFile --> db : extends Model
-
 Case "1" -- "many" CaseFile : has
 
 ' ============================================
@@ -197,7 +266,6 @@ Case "1" -- "many" CaseFile : has
 ' ============================================
 db -down-> cases_table : ORM mapping
 db -down-> case_files_table : ORM mapping
-
 cases_table "1" -- "many" case_files_table : FK relationship
 
 ' ============================================
@@ -206,9 +274,18 @@ cases_table "1" -- "many" case_files_table : FK relationship
 cases_bp -down-> "File System" : stores uploads
 
 ' ============================================
-' RELATIONSHIPS - Backend to CLI
+' RELATIONSHIPS - Backend to Redis
 ' ============================================
-cases_bp ..> MemflowAnalyzer : invokes for\nanalysis\n(future integration)
+redis_client -down-> Redis : connects
+task_queue -down-> Redis : uses as broker
+
+' ============================================
+' RELATIONSHIPS - Worker Process
+' ============================================
+Worker --> Redis : polls queue
+Worker --> analyze_memory_dump : executes task
+analyze_memory_dump --> Case : updates status
+analyze_memory_dump --> MemflowAnalyzer : invokes
 
 ' ============================================
 ' RELATIONSHIPS - CLI Internal
@@ -224,7 +301,6 @@ VolatilityInterface --> Volatility3 : executes
 
 ProgressTracker --> AnalysisProgress : creates
 FormatDetection --> FormatInfo : creates
-
 ColorOutput --> MemflowAnalyzer : formats output
 
 ' ============================================
@@ -242,21 +318,32 @@ MemflowAnalyzer --> "File System" : writes reports
 ' NOTES
 ' ============================================
 note right of "Flutter Desktop Application"
-    **Frontend Layer**
-    - Cross-platform desktop UI
+    **Frontend Layer (Updated)**
+    - 7 screens with authentication
+    - Dedicated API route modules
+    - Common widgets (sidebar, topbar)
+    - Custom page transitions
     - MVVM architecture
     - Provider state management
-    - File upload and drag-drop
-    - Real-time status updates
 end note
 
 note right of "Flask Backend API"
-    **Backend Layer**
+    **Backend Layer (Updated)**
     - RESTful API endpoints
+    - Redis/RQ async task queue
+    - Background job processing
     - SQLAlchemy ORM
     - File upload handling
-    - Case management
     - Database migrations
+end note
+
+note right of Worker
+    **Background Worker**
+    - RQ worker process
+    - Polls Redis queue
+    - Executes analysis tasks
+    - Windows-compatible
+    - Graceful shutdown handling
 end note
 
 note right of "CLI Tool - memflow-cli_v2.py"
@@ -277,6 +364,13 @@ note bottom of "PostgreSQL Database"
     - JSONB for flexible metadata
 end note
 
+note bottom of Redis
+    **Message Broker**
+    - Job queue for async tasks
+    - RQ (Redis Queue) integration
+    - Task status tracking
+end note
+
 note bottom of Volatility3
     **External Dependency**
     - Industry-standard tool
@@ -290,14 +384,21 @@ end note
 legend right
     |<#E3F2FD> Frontend | Flutter Desktop Application |
     |<#FFF3E0> Backend | Flask REST API |
+    |<#FFF9C4> Worker | Background Worker Process |
     |<#E8F5E9> CLI | Memory Analysis CLI Tool |
     |<#F3E5F5> Database | PostgreSQL Database |
-    |<#FFEBEE> External | External Tools/Libraries |
+    |<#FFEBEE> External | External Tools/Services |
     
     **Communication Patterns:**
     --> : Direct dependency/call
-    ..> : Async/future integration
+    ..> : Async/queued operation
     -- : Data relationship
+    
+    **New Components:**
+    - Redis task queue system
+    - RQ worker process
+    - 6 new frontend screens
+    - API route modules
 endlegend
 
 @enduml

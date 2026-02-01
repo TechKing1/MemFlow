@@ -5,7 +5,7 @@ skinparam componentStyle rectangle
 skinparam backgroundColor #FFFFFF
 skinparam shadowing false
 
-title MemFlow - Component Interaction Flow
+title MemFlow - Component Interaction Flow (Updated with Async Queue)
 
 ' Define components with colors
 skinparam component {
@@ -13,6 +13,8 @@ skinparam component {
     BorderColor<<UI>> #1976D2
     BackgroundColor<<API>> #FFF3E0
     BorderColor<<API>> #F57C00
+    BackgroundColor<<Queue>> #FFF9C4
+    BorderColor<<Queue>> #F57F17
     BackgroundColor<<Engine>> #E8F5E9
     BorderColor<<Engine>> #388E3C
     BackgroundColor<<Storage>> #F3E5F5
@@ -22,9 +24,13 @@ skinparam component {
 actor User
 
 package "Frontend (Flutter)" <<UI>> {
-    component [Landing Screen] as Landing
+    component [Login Screen] as Login
     component [Dashboard Screen] as Dashboard
+    component [Upload Screen] as Upload
     component [Operations Screen] as Operations
+    component [Reports Screen] as Reports
+    component [Upload API Routes] as UploadRoutes
+    component [Dashboard API Routes] as DashRoutes
     component [Case Repository] as FrontRepo
 }
 
@@ -32,8 +38,15 @@ package "Backend (Flask)" <<API>> {
     component [Upload API] as UploadAPI
     component [Status API] as StatusAPI
     component [Report API] as ReportAPI
+    component [List Cases API] as ListAPI
     component [Case Controller] as CaseCtrl
     component [File Handler] as FileHandler
+}
+
+package "Task Queue System" <<Queue>> {
+    component [Redis Queue] as Queue
+    component [RQ Worker] as Worker
+    component [analyze_memory_dump] as AnalyzeTask
 }
 
 package "Analysis Engine (CLI)" <<Engine>> {
@@ -56,58 +69,96 @@ storage "File System" <<Storage>> {
 
 cloud "External" {
     component [Volatility3] as Vol3
+    component [Redis Server] as Redis
 }
 
-' User interactions
-User --> Landing : 1. Access application
-Landing --> Dashboard : 2. Navigate to dashboard
-Dashboard --> FrontRepo : 3. Upload memory dump
+' User authentication and navigation
+User --> Login : 1. Authenticate
+Login --> Dashboard : 2. Navigate after login
+Dashboard --> DashRoutes : 3. Load cases
+DashRoutes --> ListAPI : 4. GET /api/cases/
 
 ' Upload flow
-FrontRepo --> UploadAPI : 4. POST file + metadata\n(multipart/form-data)
-UploadAPI --> CaseCtrl : 5. Create case
-CaseCtrl --> CasesDB : 6. Store case metadata
-CaseCtrl --> FileHandler : 7. Process file
-FileHandler --> Dumps : 8. Save memory dump
-FileHandler --> FilesDB : 9. Store file record\n(path, checksum, size)
+Dashboard --> Upload : 5. Navigate to upload
+Upload --> UploadRoutes : 6. Select file
+UploadRoutes --> FrontRepo : 7. Upload case
+FrontRepo --> UploadAPI : 8. POST /api/cases/upload\n(multipart/form-data)
+
+UploadAPI --> CaseCtrl : 9. Create case
+CaseCtrl --> CasesDB : 10. INSERT case\n(status='queued')
+CaseCtrl --> FileHandler : 11. Process file
+FileHandler --> Dumps : 12. Save memory dump
+FileHandler --> FilesDB : 13. INSERT file record
+
+' Async job queuing (NEW)
+CaseCtrl ..> Queue : 14. Enqueue analysis job\n(async)
+Queue --> Redis : 15. Store job in Redis
+
+' Worker picks up job (NEW)
+Worker --> Redis : 16. Poll for jobs
+Worker --> AnalyzeTask : 17. Execute task
+AnalyzeTask --> CasesDB : 18. UPDATE status\n='processing'
 
 ' Analysis flow
-CaseCtrl ..> Analyzer : 10. Trigger analysis\n(async/queued)
-Analyzer --> FormatDet : 11. Detect dump format
-FormatDet --> Dumps : 12. Read file header
-Analyzer --> OSDet : 13. Detect OS type
-OSDet --> Dumps : 14. Scan for signatures
-Analyzer --> VolRunner : 15. Run plugins
-VolRunner --> Vol3 : 16. Execute volatility\ncommands
-Vol3 --> Dumps : 17. Analyze memory
-Vol3 --> VolRunner : 18. Return results
-VolRunner --> ReportGen : 19. Parse output
-ReportGen --> Reports : 20. Generate JSON report
-ReportGen --> CaseCtrl : 21. Update case status
+AnalyzeTask --> Analyzer : 19. Run analysis
+Analyzer --> FormatDet : 20. Detect dump format
+FormatDet --> Dumps : 21. Read file header
+Analyzer --> OSDet : 22. Detect OS type
+OSDet --> Dumps : 23. Scan for signatures
+Analyzer --> VolRunner : 24. Run plugins
+VolRunner --> Vol3 : 25. Execute volatility\ncommands
+Vol3 --> Dumps : 26. Analyze memory
+Vol3 --> VolRunner : 27. Return results
+VolRunner --> ReportGen : 28. Parse output
+ReportGen --> Reports : 29. Generate JSON report
+ReportGen --> CasesDB : 30. UPDATE status\n='completed'
+ReportGen --> FilesDB : 31. UPDATE report_path
 
 ' Status polling
-Dashboard --> Operations : 22. Navigate to operations
-Operations --> FrontRepo : 23. Poll for status
-FrontRepo --> StatusAPI : 24. GET /status
-StatusAPI --> CasesDB : 25. Query case status
-CasesDB --> StatusAPI : 26. Return status
-StatusAPI --> FrontRepo : 27. JSON response
-FrontRepo --> Operations : 28. Update UI
+Dashboard --> Operations : 32. Navigate to operations
+Operations --> FrontRepo : 33. Poll for status
+FrontRepo --> StatusAPI : 34. GET /api/cases/{id}/status
+StatusAPI --> CasesDB : 35. Query case status
+CasesDB --> StatusAPI : 36. Return status
+StatusAPI --> FrontRepo : 37. JSON response
+FrontRepo --> Operations : 38. Update UI
 
 ' Report retrieval
-Operations --> FrontRepo : 29. Request report
-FrontRepo --> ReportAPI : 30. GET /report
-ReportAPI --> Reports : 31. Read report file
-Reports --> ReportAPI : 32. Report data
-ReportAPI --> FrontRepo : 33. JSON response
-FrontRepo --> Operations : 34. Display results
+Operations --> FrontRepo : 39. Request report
+FrontRepo --> ReportAPI : 40. GET /api/cases/{id}/report
+ReportAPI --> Reports : 41. Read report file
+Reports --> ReportAPI : 42. Report data
+ReportAPI --> FrontRepo : 43. JSON response
+FrontRepo --> Operations : 44. Display results
+
+' View all reports
+Dashboard --> Reports : 45. Navigate to reports
+Reports --> FrontRepo : 46. Get all reports
+FrontRepo --> ListAPI : 47. GET /api/cases/\n?status=completed
+
+note right of Queue
+    **Redis Queue (RQ)**
+    - Async job processing
+    - Decouples upload from analysis
+    - Allows background processing
+    - Job status tracking
+end note
+
+note right of Worker
+    **RQ Worker Process**
+    - Polls Redis queue
+    - Executes analysis tasks
+    - Updates case status
+    - Handles failures gracefully
+end note
 
 note right of UploadAPI
     **Upload Endpoint**
     - Validates file type
     - Generates unique case ID
     - Calculates SHA-256 checksum
-    - Returns case ID for tracking
+    - Enqueues analysis job
+    - Returns immediately
 end note
 
 note right of Analyzer
@@ -133,6 +184,12 @@ legend right
     
     **Status Values:**
     queued → processing → completed/failed
+    
+    **New Components:**
+    - Redis Queue for async processing
+    - RQ Worker for background jobs
+    - Login authentication
+    - Dedicated upload screen
 endlegend
 
 @enduml
