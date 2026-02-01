@@ -11,6 +11,9 @@ def create_app():
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
+    
+    # Initialize Redis connection (imported for side effects - connection test)
+    from app.extensions import redis_conn, task_queue
 
     # Create database tables
     with app.app_context():

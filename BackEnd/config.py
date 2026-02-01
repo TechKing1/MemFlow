@@ -22,3 +22,9 @@ class Config:
 
     # Flask environment (development by default)
     FLASK_ENV = os.getenv("FLASK_ENV", "development")
+
+    # Redis configuration for job queue
+    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6382/0")
+    
+    # RQ Queue name for forensics analysis
+    RQ_QUEUE_NAME = os.getenv("RQ_QUEUE_NAME", "forensics_analysis")

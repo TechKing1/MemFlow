@@ -10,10 +10,10 @@ class Case(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text, nullable=True)
-    status = db.Column(db.String(20), nullable=False, default='queued')
-    priority = db.Column(db.SmallInteger, nullable=False, default=5)
-    created_at = db.Column(db.DateTime, nullable=False, server_default=func.now())
-    updated_at = db.Column(db.DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    status = db.Column(db.String(20), nullable=False, default='queued', index=True)
+    priority = db.Column(db.SmallInteger, nullable=False, default=5, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, server_default=func.now(), index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
     case_metadata = db.Column('metadata', JSONB, nullable=False, default=dict)
     
     # Relationship with CaseFile

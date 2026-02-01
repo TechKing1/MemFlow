@@ -5,7 +5,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from sqlalchemy.exc import SQLAlchemyError
-from app.extensions import db
+from app.extensions import db, task_queue
 from app.models import Case, CaseFile
 
 # Initialize Blueprint
@@ -33,6 +33,79 @@ def calculate_checksum(file_path):
         for byte_block in iter(lambda: f.read(4096), b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
+
+@cases_bp.route("/", methods=["GET"])
+def get_all_cases():
+    """
+    Get list of all cases with optional filtering and pagination
+    ---
+    tags:
+      - Cases
+    parameters:
+      - name: status
+        in: query
+        type: string
+        required: false
+        description: Filter by case status (queued, processing, completed, failed)
+      - name: page
+        in: query
+        type: integer
+        required: false
+        default: 1
+        description: Page number for pagination
+      - name: limit
+        in: query
+        type: integer
+        required: false
+        default: 10
+        description: Number of cases per page
+    responses:
+      200:
+        description: List of cases
+    """
+    try:
+        # Get query parameters
+        status = request.args.get('status')
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 10, type=int)
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if limit < 1 or limit > 100:
+            limit = 10
+        
+        # Build query
+        query = Case.query
+        
+        # Apply status filter if provided
+        if status:
+            query = query.filter_by(status=status)
+        
+        # Order by created_at descending (newest first)
+        query = query.order_by(Case.created_at.desc())
+        
+        # Get total count before pagination
+        total = query.count()
+        
+        # Apply pagination
+        cases = query.paginate(page=page, per_page=limit, error_out=False)
+        
+        return jsonify({
+            "cases": [case.to_dict() for case in cases.items],
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": cases.pages,
+                "has_next": cases.has_next,
+                "has_prev": cases.has_prev
+            }
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Error fetching cases: {str(e)}")
+        return jsonify({"error": "Error fetching cases"}), 500
 
 @cases_bp.route("/upload", methods=["POST"])
 def upload_case():
@@ -143,10 +216,52 @@ def upload_case():
         # Commit the transaction
         db.session.commit()
         
-        return jsonify({
+        # ========== JOB ENQUEUE LOGIC ==========
+        # After successful file upload and database commit,
+        # enqueue the analysis job to Redis Queue
+        job = None
+        job_id = None
+        
+        if task_queue:
+            try:
+                # Import the task function
+                from app.tasks import analyze_memory_dump
+                
+                # Enqueue the job with case_id as the only parameter
+                # The worker will pick this up and process it asynchronously
+                job = task_queue.enqueue(
+                    analyze_memory_dump,  # Function to execute
+                    case.id,              # Argument: case_id
+                    job_timeout='2h',     # Maximum execution time (2 hours)
+                    result_ttl=86400,     # Keep result for 24 hours
+                    failure_ttl=86400     # Keep failure info for 24 hours
+                )
+                
+                job_id = job.id
+                current_app.logger.info(f"Enqueued analysis job {job_id} for case {case.id}")
+                
+            except Exception as e:
+                # Log the error but don't fail the upload
+                # The case is already created, user can retry analysis later
+                current_app.logger.error(f"Failed to enqueue job for case {case.id}: {str(e)}")
+        else:
+            current_app.logger.warning("Task queue not available - job not enqueued")
+        
+        # Return success response with job information
+        response_data = {
             "message": "Case created successfully",
             "case": case.to_dict()
-        }), 201
+        }
+        
+        # Add job info if job was enqueued
+        if job_id:
+            response_data["job"] = {
+                "job_id": job_id,
+                "status": "queued",
+                "message": "Analysis job has been queued for processing"
+            }
+        
+        return jsonify(response_data), 201
         
     except SQLAlchemyError as e:
         db.session.rollback()
