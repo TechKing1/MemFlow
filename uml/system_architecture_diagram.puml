@@ -1,0 +1,180 @@
+@startuml Memory Forensics - System Architecture
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+
+title Memory Forensics Automation Tool - System Architecture
+
+' ==================== PRESENTATION LAYER ====================
+
+package "PRESENTATION LAYER" <<Rectangle>> #E3F2FD {
+    component "Flutter Desktop UI\n(Windows/macOS/Linux)" as UI #2196F3 {
+        [Dashboard Screen]
+        [Upload Screen]
+        [Reports Screen]
+    }
+}
+
+' ==================== APPLICATION LAYER ====================
+
+package "APPLICATION LAYER" <<Rectangle>> #FFF3E0 {
+    component "Flask Backend API Server\n(run.py)" as API #FF9800 {
+        [Routes (cases.py)]
+        [Controllers]
+        [File Upload Handler]
+        [Validation]
+    }
+}
+
+' ==================== DATA LAYER ====================
+
+package "DATA LAYER" <<Rectangle>> #F3E5F5 {
+    database "PostgreSQL\nDatabase" as DB #9C27B0 {
+        [cases table]
+        [case_files table]
+    }
+    
+    storage "File System\ndata/cases/" as FS #9C27B0 {
+        folder "{case_id}/" {
+            file "dump.raw"
+        }
+    }
+    
+    queue "Redis Queue (RQ)\nlocalhost:6382" as Redis #9C27B0 {
+        [Job queue]
+        [Job metadata]
+        [Job status]
+    }
+}
+
+' ==================== PROCESSING LAYER ====================
+
+package "PROCESSING LAYER" <<Rectangle>> #E8F5E9 {
+    component "RQ Worker\n(worker.py)" as Worker #4CAF50 {
+        [SimpleWorker]
+        [Job processor]
+    }
+    
+    component "Analysis Task\n(tasks.py)" as Task #4CAF50 {
+        [analyze_memory_dump()]
+    }
+    
+    component "Volatility3 CLI\n(memflow-cli_v2)" as Vol3 #4CAF50 {
+        [Format detection]
+        [OS detection]
+        [Plugin execution]
+        [Report generation]
+    }
+}
+
+' ==================== RELATIONSHIPS ====================
+
+' Presentation to Application
+UI -down-> API : "HTTP REST API\n(JSON)"
+
+' Application to Data Layer
+API -down-> FS : "(1) Store File"
+API -down-> DB : "(2) Save Metadata"
+API -down-> Redis : "(3) Enqueue Job"
+
+' Processing Layer interactions
+Redis -down-> Worker : "(4) Poll for jobs"
+Worker -down-> Task : "(5) Execute Task"
+Task -up-> DB : "(6) Update Status"
+Task -down-> Vol3 : "(7) Call CLI Tool"
+
+' Task reads from Data Layer
+Task -up-> DB : "Read file path"
+Task -left-> FS : "Read memory dump"
+
+' Volatility writes results
+Vol3 -up-> FS : "Save report.json"
+
+' ==================== NOTES ====================
+
+note right of UI
+  **Client Application**
+  - Cross-platform desktop
+  - Material Design UI
+  - Real-time status updates
+end note
+
+note right of API
+  **REST API Endpoints**
+  - POST /api/cases
+  - GET /api/cases
+  - POST /api/cases/{id}/upload
+  - GET /api/cases/{id}/report
+  - GET /api/cases/{id}/status
+end note
+
+note bottom of FS
+  **File Storage**
+  - Memory dumps (binary)
+  - Analysis reports (JSON)
+  - Organized by case_id
+end note
+
+note bottom of DB
+  **Metadata Storage**
+  - Case information
+  - File checksums
+  - Status tracking
+  - Timestamps
+end note
+
+note bottom of Redis
+  **Job Queue**
+  - Async job management
+  - Only passes case_id
+  - No binary data
+  - Job status tracking
+end note
+
+note right of Worker
+  **Background Processor**
+  - Windows-compatible
+  - SimpleWorker (no fork)
+  - Polls Redis queue
+  - Executes analysis tasks
+end note
+
+note right of Task
+  **Analysis Orchestrator**
+  - Retrieves file path from DB
+  - Reads dump from disk
+  - Updates case status
+  - Calls Volatility3 CLI
+end note
+
+note right of Vol3
+  **Forensics Engine**
+  - Memory dump analysis
+  - OS/format detection
+  - Plugin execution
+  - JSON report output
+end note
+
+' ==================== LEGEND ====================
+
+legend bottom left
+  **Data Flow Legend**
+  (1) Store File - Save memory dump to file system
+  (2) Save Metadata - Store case info in PostgreSQL
+  (3) Enqueue Job - Add analysis job to Redis queue
+  (4) Poll for jobs - Worker checks queue for new jobs
+  (5) Execute Task - Worker runs analysis task
+  (6) Update Status - Task updates case status in DB
+  (7) Call CLI Tool - Task invokes Volatility3 for analysis
+  
+  **Technology Stack**
+  • Frontend: Flutter (Desktop)
+  • Backend: Flask (Python)
+  • Database: PostgreSQL
+  • Queue: Redis + RQ
+  • Worker: RQ SimpleWorker
+  • Analysis: Volatility3 CLI
+end legend
+
+@enduml

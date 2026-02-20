@@ -15,7 +15,7 @@ import sys
 import signal
 import time
 import logging
-from rq import Worker, Queue
+from rq import SimpleWorker, Queue
 from rq.worker import StopRequested
 from app.extensions.redis_client import redis_conn
 from config import Config
@@ -40,11 +40,20 @@ def signal_handler(signum, frame):
     shutdown_requested = True
     print("\n⚠ Shutdown requested... Finishing current job (Ctrl+C again to force quit)")
 
+def job_started(job, *args, **kwargs):
+    """Callback when a job starts"""
+    print(f"📥 Job received, starting analysis...")
+    print(f"▶ Job {job.id} started")
+
+def job_finished(job, *args, **kwargs):
+    """Callback when a job finishes"""
+    print(f"✔ Job {job.id} finished")
+
 def main():
     """Start the RQ worker with Windows-compatible shutdown handling"""
     if not redis_conn:
         print("✗ Cannot start worker: Redis connection failed")
-        print("  Make sure Redis server is running on localhost:6381")
+        print("  Make sure Redis server is running on localhost:6382")
         sys.exit(1)
     
     # Register signal handler for graceful shutdown
@@ -59,7 +68,11 @@ def main():
     
     # Create queue and worker
     queue = Queue(Config.RQ_QUEUE_NAME, connection=redis_conn)
-    worker = Worker([queue], connection=redis_conn)
+    worker = SimpleWorker([queue], connection=redis_conn)
+
+    
+    # Register job lifecycle callbacks
+    worker.push_exc_handler(lambda job, *exc_info: print(f"❌ Job {job.id} failed"))
     
     print(f"\n✓ Worker started - Listening on queue: {Config.RQ_QUEUE_NAME}")
     print("  Press Ctrl+C to stop\n")

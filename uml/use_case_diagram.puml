@@ -1,0 +1,65 @@
+@startuml Memory Forensics Use Case Diagram (Simplified)
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Memory Forensics Automation Tool - Use Case Diagram\n(High-Level User Goals)
+
+' Actors
+actor "Forensic Analyst" as analyst
+actor "System Administrator" as admin
+
+' System boundary
+rectangle "Memory Forensics Automation Tool" {
+  
+  ' Core Use Cases (User-Facing)
+  usecase "Manage Cases" as UC1
+  usecase "Upload Memory Dump" as UC2
+  usecase "Analyze Memory Dump" as UC3
+  usecase "View Analysis Report" as UC4
+  usecase "Export Report" as UC5
+  usecase "Monitor System" as UC6
+  
+  ' Sub-use cases (shown with include/extend)
+  usecase "Validate File" as UC_Validate
+  usecase "Detect Format & OS" as UC_Detect
+  usecase "Execute Volatility Plugins" as UC_Execute
+  usecase "Generate Report" as UC_Generate
+}
+
+' Primary Actor Relationships
+analyst --> UC1
+analyst --> UC2
+analyst --> UC3
+analyst --> UC4
+analyst --> UC5
+
+admin --> UC6
+
+' Include Relationships (mandatory steps)
+UC2 ..> UC_Validate : <<include>>
+UC3 ..> UC_Detect : <<include>>
+UC3 ..> UC_Execute : <<include>>
+UC3 ..> UC_Generate : <<include>>
+
+' Extend Relationships (optional variations)
+UC5 ..> UC4 : <<extend>>
+
+' Notes
+note right of UC2
+  Supports drag-and-drop
+  and file browser
+end note
+
+note right of UC3
+  Runs asynchronously
+  in background
+end note
+
+note right of UC4
+  Displays processes,
+  network connections,
+  and security indicators
+end note
+
+@enduml

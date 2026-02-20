@@ -1,0 +1,338 @@
+@startuml Memory Forensics - Abstract Class Diagram (Simplified)
+
+!theme plain
+skinparam classAttributeIconSize 0
+skinparam backgroundColor #FFFFFF
+
+title Memory Forensics Automation Tool - Abstract Class Diagram\n(High-Level System Architecture)
+
+' ==================== CORE DOMAIN ====================
+
+package "Core Domain" {
+    
+    class Case {
+        - id: Integer
+        - name: String
+        - status: CaseStatus
+        - priority: Integer
+        - created_at: DateTime
+        - metadata: JSON
+        __
+        + create(): Case
+        + update_status(status): void
+        + to_dict(): Dictionary
+    }
+    
+    enum CaseStatus {
+        QUEUED
+        PROCESSING
+        COMPLETED
+        FAILED
+    }
+    
+    class CaseFile {
+        - id: Integer
+        - case_id: Integer
+        - file_path: String
+        - file_size: BigInteger
+        - checksum: String
+        __
+        + calculate_checksum(): String
+        + to_dict(): Dictionary
+    }
+    
+    class MemoryDump {
+        - file_path: String
+        - format: DumpFormat
+        - os_type: OperatingSystem
+        __
+        + detect_format(): DumpFormat
+        + detect_os(): OperatingSystem
+    }
+    
+    enum DumpFormat {
+        RAW
+        EWF
+        LIME
+        VMWARE
+        UNKNOWN
+    }
+    
+    enum OperatingSystem {
+        WINDOWS
+        LINUX
+        MACOS
+        UNKNOWN
+    }
+}
+
+' ==================== ANALYSIS ====================
+
+package "Analysis Engine" {
+    
+    abstract class Detector {
+        # confidence_threshold: Float
+        __
+        + {abstract} detect(file_path): DetectionResult
+        + calculate_confidence(): Float
+    }
+    
+    class FormatDetector {
+        + detect(file_path): FormatInfo
+        - check_magic_bytes(): DumpFormat
+    }
+    
+    class OSDetector {
+        + detect(file_path): OSInfo
+        - scan_signatures(): OperatingSystem
+    }
+    
+    abstract class VolatilityPlugin {
+        # plugin_name: String
+        # timeout: Integer
+        __
+        + {abstract} execute(dump_path): PluginResult
+        + {abstract} parse_output(raw): Dictionary
+    }
+    
+    class PluginExecutor {
+        - max_workers: Integer
+        __
+        + run_parallel(plugins, dump_path): Results
+        + run_sequential(plugins, dump_path): Results
+    }
+    
+    class AnalysisResult {
+        - case_id: Integer
+        - system_info: SystemInfo
+        - processes: List<Process>
+        - network_connections: List<Connection>
+        __
+        + get_summary(): AnalysisSummary
+        + to_dict(): Dictionary
+    }
+}
+
+' ==================== JOB PROCESSING ====================
+
+package "Job Processing" {
+    
+    class Job {
+        - job_id: String
+        - case_id: Integer
+        - status: JobStatus
+        - timeout: Integer
+        __
+        + enqueue(): String
+        + execute(): void
+        + update_status(status): void
+    }
+    
+    enum JobStatus {
+        QUEUED
+        PROCESSING
+        COMPLETED
+        FAILED
+    }
+    
+    class JobQueue {
+        - queue_name: String
+        __
+        + enqueue(task, payload): Job
+        + dequeue(): Job
+        + get_status(job_id): JobStatus
+    }
+    
+    class Worker {
+        - worker_id: String
+        - queue: JobQueue
+        __
+        + start(): void
+        + stop(): void
+        + process_job(job): void
+    }
+    
+    abstract class Task {
+        # case_id: Integer
+        __
+        + {abstract} execute(): Dictionary
+        + {abstract} validate_input(): Boolean
+    }
+    
+    class AnalysisTask {
+        - dump_path: String
+        __
+        + execute(): AnalysisResult
+        + validate_input(): Boolean
+    }
+}
+
+' ==================== REPORTING ====================
+
+package "Reporting" {
+    
+    abstract class Report {
+        # case_id: Integer
+        # format: ReportFormat
+        __
+        + {abstract} generate(): void
+        + {abstract} save(path): void
+    }
+    
+    class JSONReport {
+        + generate(): void
+        + save(path): void
+    }
+    
+    class PDFReport {
+        + generate(): void
+        + save(path): void
+    }
+    
+    enum ReportFormat {
+        JSON
+        PDF
+        HTML
+    }
+    
+    class ReportGenerator {
+        - analysis_result: AnalysisResult
+        __
+        + generate_json(): JSONReport
+        + generate_pdf(): PDFReport
+    }
+}
+
+' ==================== DATA ACCESS ====================
+
+package "Data Access" {
+    
+    interface Repository<T> {
+        + create(entity: T): T
+        + find_by_id(id): T
+        + find_all(): List<T>
+        + update(entity: T): T
+        + delete(id): Boolean
+    }
+    
+    class CaseRepository {
+        + create(case): Case
+        + find_by_id(id): Case
+        + find_by_status(status): List<Case>
+        + paginate(page, limit): PaginatedResult
+    }
+    
+    class FileStorage {
+        - base_path: String
+        __
+        + save_file(file, case_id): String
+        + read_file(path): Bytes
+        + calculate_checksum(path): String
+    }
+}
+
+' ==================== API LAYER ====================
+
+package "API Layer" {
+    
+    abstract class APIController {
+        # request: Request
+        # response: Response
+        __
+        # validate_request(): Boolean
+        # handle_error(error): Response
+    }
+    
+    class CaseController {
+        - case_repository: CaseRepository
+        - job_queue: JobQueue
+        __
+        + create_case(request): Response
+        + get_case(case_id): Response
+        + upload_file(file, metadata): Response
+    }
+    
+    class ReportController {
+        - case_repository: CaseRepository
+        __
+        + get_report(case_id): Response
+        + export_report(case_id, format): Response
+    }
+}
+
+' ==================== VALIDATION ====================
+
+package "Validation" {
+    
+    abstract class Validator {
+        + {abstract} validate(input): ValidationResult
+    }
+    
+    class FileValidator {
+        - allowed_extensions: List<String>
+        __
+        + validate(file): ValidationResult
+    }
+    
+    class ValidationResult {
+        + is_valid: Boolean
+        + errors: List<String>
+    }
+}
+
+' ==================== RELATIONSHIPS ====================
+
+' Core Domain
+Case "1" *-- "many" CaseFile
+Case --> CaseStatus
+CaseFile --> MemoryDump
+MemoryDump --> DumpFormat
+MemoryDump --> OperatingSystem
+
+' Analysis Engine
+Detector <|-- FormatDetector
+Detector <|-- OSDetector
+FormatDetector ..> DumpFormat
+OSDetector ..> OperatingSystem
+PluginExecutor o-- VolatilityPlugin
+
+' Job Processing
+JobQueue o-- Job
+Job --> JobStatus
+Worker --> JobQueue
+Task <|-- AnalysisTask
+AnalysisTask ..> AnalysisResult
+AnalysisTask --> FormatDetector
+AnalysisTask --> OSDetector
+AnalysisTask --> PluginExecutor
+
+' Reporting
+Report <|-- JSONReport
+Report <|-- PDFReport
+Report --> ReportFormat
+ReportGenerator ..> Report
+ReportGenerator --> AnalysisResult
+
+' Data Access
+Repository <|.. CaseRepository
+CaseRepository ..> Case
+FileStorage ..> CaseFile
+
+' API Layer
+APIController <|-- CaseController
+APIController <|-- ReportController
+CaseController --> CaseRepository
+CaseController --> JobQueue
+ReportController --> CaseRepository
+
+' Validation
+Validator <|-- FileValidator
+Validator ..> ValidationResult
+CaseController ..> FileValidator
+
+' Cross-package
+AnalysisTask --> Case
+Job --> Case
+ReportGenerator --> Case
+
+@enduml

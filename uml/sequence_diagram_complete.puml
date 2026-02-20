@@ -1,0 +1,335 @@
+@startuml Memory Forensics - Complete System Sequence Diagram
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam sequenceMessageAlign center
+skinparam BoxPadding 10
+
+title Memory Forensics Automation Tool - Complete System Flow
+
+actor "Forensic Analyst" as User
+box "Frontend (Flutter Desktop)" #LightBlue
+    participant "Dashboard\nScreen" as Dashboard
+    participant "Upload\nScreen" as Upload
+    participant "Case\nRepository" as Repo
+end box
+
+box "Backend API (Flask)" #LightGreen
+    participant "Flask\nAPI Server" as API
+    participant "Cases\nRoute" as Route
+    participant "File\nHandler" as FileHandler
+end box
+
+box "Data Layer" #LightYellow
+    database "PostgreSQL\nDatabase" as DB
+    participant "File\nSystem" as FS
+    participant "Redis\nQueue" as Redis
+end box
+
+box "Background Processing" #LightCoral
+    participant "RQ\nWorker" as Worker
+    participant "analyze_memory_dump\nTask" as Task
+    participant "Volatility3\nCLI Tool" as VolCLI
+end box
+
+box "Analysis Engine" #LightPink
+    participant "Format\nDetector" as Format
+    participant "OS\nDetector" as OSDetect
+    participant "Plugin\nExecutor" as PluginExec
+    participant "Report\nGenerator" as Reporter
+end box
+
+== 1. Case Creation & File Upload ==
+
+User -> Dashboard: Open application
+activate Dashboard
+Dashboard -> User: Display dashboard with statistics
+User -> Dashboard: Click "Upload Case"
+Dashboard -> Upload: Navigate to upload screen
+deactivate Dashboard
+activate Upload
+
+User -> Upload: Drag & drop memory dump file\n(.raw, .mem, .vmem, .bin)
+Upload -> Upload: Validate file extension
+Upload -> Upload: Display file name and size
+
+User -> Upload: Enter case name & description
+User -> Upload: Click "Upload"
+
+Upload -> Repo: uploadCase(file, name, description)
+activate Repo
+
+Repo -> API: POST /api/cases/upload\n(multipart/form-data)
+activate API
+
+API -> Route: handle_upload_request()
+activate Route
+
+Route -> Route: Validate file type\nValidate case name\nValidate file size
+
+Route -> DB: BEGIN TRANSACTION
+activate DB
+
+Route -> DB: INSERT INTO cases\n(name, description, status='queued',\npriority=5, created_at=NOW())
+DB --> Route: case_id (e.g., 25)
+
+Route -> FileHandler: save_file(file, case_id)
+activate FileHandler
+
+FileHandler -> FS: Create directory\ndata/cases/{case_id}/
+activate FS
+FS --> FileHandler: Directory created
+deactivate FS
+
+FileHandler -> FS: Save file with secure filename
+activate FS
+FS --> FileHandler: File saved at path
+deactivate FS
+
+FileHandler -> FileHandler: Calculate SHA-256 checksum\n(read in 4KB chunks)
+
+FileHandler -> DB: INSERT INTO case_files\n(case_id, file_path, file_size,\nchecksum, mime_type, stored_at)
+activate DB
+DB --> FileHandler: file_id
+deactivate DB
+
+FileHandler --> Route: file_metadata\n{path, size, checksum}
+deactivate FileHandler
+
+Route -> DB: COMMIT TRANSACTION
+deactivate DB
+
+== 2. Asynchronous Job Enqueue ==
+
+Route -> Redis: task_queue.enqueue(\nanalyze_memory_dump,\ncase_id=25,\njob_timeout='2h',\nresult_ttl=86400)
+activate Redis
+
+Redis -> Redis: Create job with unique ID
+Redis -> Redis: Store job in queue:\n'forensics_analysis'
+
+Redis --> Route: job_id (e.g., "abc123...")
+deactivate Redis
+
+Route --> API: Response:\n{\n  "message": "Case created",\n  "case": {case_object},\n  "job": {\n    "job_id": "abc123",\n    "status": "queued"\n  }\n}
+deactivate Route
+
+API --> Repo: HTTP 201 Created\n{case_id, job_id, status}
+deactivate API
+
+Repo --> Upload: Upload successful
+deactivate Repo
+
+Upload -> Dashboard: Navigate to dashboard
+deactivate Upload
+activate Dashboard
+
+Dashboard -> User: Show success notification:\n"Case created successfully\nAnalysis job queued"
+deactivate Dashboard
+
+== 3. Background Worker Processing ==
+
+note over Worker
+    Worker continuously polls
+    Redis queue for jobs
+end note
+
+Worker -> Redis: Poll for jobs from\n'forensics_analysis' queue
+activate Worker
+activate Redis
+
+Redis --> Worker: Job: analyze_memory_dump\n{case_id: 25}
+deactivate Redis
+
+Worker -> Task: Execute task(case_id=25)
+activate Task
+
+Task -> DB: SELECT * FROM cases\nWHERE id=25
+activate DB
+DB --> Task: case_data\n{id, name, status, files}
+deactivate DB
+
+Task -> DB: UPDATE cases\nSET status='processing',\nupdated_at=NOW()\nWHERE id=25
+activate DB
+DB --> Task: Updated
+deactivate DB
+
+Task -> DB: SELECT file_path FROM case_files\nWHERE case_id=25
+activate DB
+DB --> Task: file_path:\n"data/cases/25/dump.raw"
+deactivate DB
+
+== 4. Memory Dump Analysis ==
+
+Task -> Format: detect_dump_format(file_path)
+activate Format
+
+Format -> FS: Read file header (512 bytes)
+activate FS
+FS --> Format: header_bytes
+deactivate FS
+
+Format -> Format: Check magic bytes:\n- PAGEDUMP (Windows crash)\n- ELF (Linux core)\n- LIME, VMware, etc.
+
+Format --> Task: FormatInfo:\n{\n  type: "Raw",\n  confidence: "HIGH",\n  evidence: [...]\n}
+deactivate Format
+
+Task -> OSDetect: enhanced_os_detection(file_path)
+activate OSDetect
+
+OSDetect -> FS: Read sample (4MB)
+activate FS
+FS --> OSDetect: sample_data
+deactivate FS
+
+OSDetect -> OSDetect: Scan for signatures:\n- Windows: "SystemRoot", "KDBG"\n- Linux: "Linux version"\n- Calculate confidence scores
+
+OSDetect --> Task: OSInfo:\n{\n  os_type: "Windows",\n  version: "Windows 10",\n  confidence: "HIGH"\n}
+deactivate OSDetect
+
+Task -> Task: Select plugins based on OS:\n- windows.pslist\n- windows.netscan\n- windows.cmdline\n- windows.dlllist
+
+== 5. Volatility Plugin Execution ==
+
+Task -> PluginExec: run_plugins_parallel(\nplugins, file_path,\nmax_workers=4)
+activate PluginExec
+
+loop For each plugin (parallel execution)
+    PluginExec -> VolCLI: Execute:\nvol -f dump.raw\nwindows.pslist
+    activate VolCLI
+    
+    VolCLI -> FS: Read and analyze\nmemory structures
+    activate FS
+    FS --> VolCLI: Memory data
+    deactivate FS
+    
+    VolCLI -> VolCLI: Parse process structures\nExtract PIDs, names, PPIDs
+    
+    VolCLI --> PluginExec: Plugin output (text)
+    deactivate VolCLI
+end
+
+PluginExec -> PluginExec: Parse all plugin outputs\nExtract structured data
+
+PluginExec --> Task: Parsed results:\n{\n  processes: [...],\n  network: [...],\n  dlls: [...]\n}
+deactivate PluginExec
+
+== 6. Report Generation ==
+
+Task -> Reporter: generate_report(\ncase_id, results,\nfile_metadata)
+activate Reporter
+
+Reporter -> Reporter: Build report structure:\n- Summary\n- System info\n- Process list\n- Network connections\n- Analysis metadata
+
+Reporter -> Reporter: Format as JSON
+
+Reporter -> FS: Save report to:\ndata/cases/25/report.json
+activate FS
+FS --> Reporter: Report saved
+deactivate FS
+
+Reporter --> Task: report_path:\n"data/cases/25/report.json"
+deactivate Reporter
+
+== 7. Update Case Status ==
+
+Task -> DB: UPDATE cases\nSET status='completed',\nmetadata='{...}',\nupdated_at=NOW()\nWHERE id=25
+activate DB
+DB --> Task: Updated
+deactivate DB
+
+Task -> DB: UPDATE case_files\nSET report_path='...'\nWHERE case_id=25
+activate DB
+DB --> Task: Updated
+deactivate DB
+
+Task --> Worker: Task completed successfully
+deactivate Task
+
+Worker -> Redis: Mark job as finished
+activate Redis
+Redis --> Worker: Job marked complete
+deactivate Redis
+
+Worker -> Worker: Log completion
+deactivate Worker
+
+== 8. Status Polling & Report Retrieval ==
+
+note over User, Dashboard
+    User periodically checks
+    case status from dashboard
+end note
+
+User -> Dashboard: View case list
+activate Dashboard
+
+Dashboard -> Repo: getCases(page=1, limit=10)
+activate Repo
+
+Repo -> API: GET /api/cases/?page=1&limit=10
+activate API
+
+API -> DB: SELECT * FROM cases\nORDER BY created_at DESC\nLIMIT 10 OFFSET 0
+activate DB
+DB --> API: cases_list
+deactivate DB
+
+API --> Repo: HTTP 200 OK\n{cases: [...], pagination: {...}}
+deactivate API
+
+Repo --> Dashboard: List of cases
+deactivate Repo
+
+Dashboard -> User: Display cases with status:\n"Case 25: Completed ✓"
+
+User -> Dashboard: Click on Case 25\nto view report
+
+Dashboard -> Repo: getCaseReport(case_id=25)
+activate Repo
+
+Repo -> API: GET /api/cases/25/report
+activate API
+
+API -> DB: SELECT * FROM cases\nWHERE id=25
+activate DB
+DB --> API: case_data
+deactivate DB
+
+API -> FS: Read report.json
+activate FS
+FS --> API: report_content
+deactivate FS
+
+API --> Repo: HTTP 200 OK\n{report: {...}}
+deactivate API
+
+Repo --> Dashboard: CaseReport object
+deactivate Repo
+
+Dashboard -> User: Display analysis results:\n- System info\n- Processes (25 found)\n- Network connections (12)\n- Indicators
+deactivate Dashboard
+
+== 9. Error Handling (Alternative Flow) ==
+
+note over Task, DB
+    If analysis fails at any point
+end note
+
+Task -> DB: UPDATE cases\nSET status='failed',\nmetadata='{"error": "..."}'\nWHERE id=25
+activate Task
+activate DB
+DB --> Task: Updated
+deactivate DB
+
+Task --> Worker: Task failed with error
+deactivate Task
+
+Worker -> Worker: Log error details
+activate Worker
+deactivate Worker
+
+Dashboard -> User: Show error notification:\n"Analysis failed - see details"
+activate Dashboard
+deactivate Dashboard
+
+@enduml

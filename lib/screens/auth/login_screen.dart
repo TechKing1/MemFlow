@@ -66,7 +66,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 32),
                     const Text(
-                      'MemForensics',
+                      'MEMFLOW',
                       style: TextStyle(
                         fontSize: 42,
                         fontWeight: FontWeight.bold,
