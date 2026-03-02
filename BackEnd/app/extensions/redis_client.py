@@ -10,7 +10,6 @@ from config import Config
 try:
     redis_conn = redis.from_url(
         Config.REDIS_URL,
-        decode_responses=True,
         socket_connect_timeout=5
     )
     # Test connection

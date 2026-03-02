@@ -1,0 +1,80 @@
+@startuml Memory Forensics - System Architecture (Simplified)
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+
+title Memory Forensics Automation Tool - System Architecture (Simplified)
+
+' ==================== COMPONENTS ====================
+
+component "Flutter\nDesktop UI" as UI #2196F3
+component "Flask\nBackend API" as API #FF9800
+database "PostgreSQL\nDatabase" as DB #9C27B0
+storage "File System\n(Memory Dumps)" as FS #9C27B0
+queue "Redis\nJob Queue" as Redis #9C27B0
+component "RQ Worker\n(Background)" as Worker #4CAF50
+component "Volatility3\nCLI" as Vol3 #4CAF50
+
+' ==================== RELATIONSHIPS ====================
+
+UI -down-> API : "HTTP REST API"
+
+API -down-> FS : "1. Store File"
+API -down-> DB : "2. Save Metadata"
+API -down-> Redis : "3. Enqueue Job"
+
+Redis -down-> Worker : "4. Poll Jobs"
+
+Worker -up-> DB : "Read Path &\nUpdate Status"
+Worker -left-> FS : "Read Dump"
+Worker -down-> Vol3 : "5. Execute Analysis"
+
+Vol3 -up-> FS : "Save Report"
+
+' ==================== NOTES ====================
+
+note right of UI
+  **Client**
+  Desktop application
+  (Windows/macOS/Linux)
+end note
+
+note right of API
+  **REST API**
+  File upload
+  Case management
+  Report retrieval
+end note
+
+note bottom of DB
+  **Metadata**
+  Cases & Files
+  Status tracking
+end note
+
+note bottom of FS
+  **Binary Storage**
+  Memory dumps
+  JSON reports
+end note
+
+note bottom of Redis
+  **Async Queue**
+  Job management
+  (case_id only)
+end note
+
+note right of Worker
+  **Background**
+  Async processing
+  SimpleWorker
+end note
+
+note right of Vol3
+  **Analysis**
+  Memory forensics
+  Plugin execution
+end note
+
+@enduml

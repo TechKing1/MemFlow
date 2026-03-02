@@ -61,7 +61,7 @@ class _AppSidebarState extends State<AppSidebar>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'MemForensics',
+                          'MEMFLOW',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,

@@ -1,0 +1,1248 @@
+================================================================================
+DETAILED FUNCTIONAL SPECIFICATION
+Memory Forensics Automation Tool
+================================================================================
+
+This document lists all functional requirements in a standardized format.
+Each requirement includes: ID, Name, Description, Input, Output, Priority,
+Pre-conditions, and Post-conditions.
+
+================================================================================
+1. CASE MANAGEMENT
+================================================================================
+
+Table 1: Create New Case
+--------------------------------------------------------------------------------
+FR-01           Create New Case
+--------------------------------------------------------------------------------
+Description     The system must allow users to create new forensic cases with
+                a unique case name and automatically assign a unique case ID.
+                
+Input           - Case name (string, required)
+                - Case description (string, optional)
+                - Priority level (integer 1-10, optional, default: 5)
+                - Metadata (JSON object, optional)
+                
+Output          - Case ID (unique integer)
+                - Case object with all fields populated
+                - Creation timestamp
+                - HTTP 201 Created status
+                
+Priority        Must-have
+
+Pre-condition   - User is authenticated (if auth is enabled)
+                - Case name is not empty
+                - Database connection is available
+                
+Post-condition  - New case record exists in database
+                - Case status is set to "queued"
+                - Case directory is created in file system
+                - Timestamps are recorded (created_at, updated_at)
+================================================================================
+
+Table 2: View Case List
+--------------------------------------------------------------------------------
+FR-02           View Case List
+--------------------------------------------------------------------------------
+Description     Users must be able to view a paginated list of all cases,
+                ordered by creation date (newest first).
+                
+Input           - Page number (integer, optional, default: 1)
+                - Items per page (integer, optional, default: 10, max: 100)
+                - Status filter (string, optional: queued/processing/completed/failed)
+                
+Output          - Array of case objects
+                - Pagination metadata (total count, total pages, current page)
+                - HTTP 200 OK status
+                
+Priority        Must-have
+
+Pre-condition   - Database connection is available
+                - Page number >= 1
+                - Limit is between 1 and 100
+                
+Post-condition  - User receives list of cases matching criteria
+                - Pagination information is accurate
+================================================================================
+
+Table 3: View Case Details
+--------------------------------------------------------------------------------
+FR-03           View Case Details
+--------------------------------------------------------------------------------
+Description     Users must be able to retrieve detailed information for a
+                specific case using its case ID.
+                
+Input           - Case ID (integer, required)
+                
+Output          - Complete case object including:
+                  * Case ID, name, description
+                  * Status, priority
+                  * Timestamps (created_at, updated_at)
+                  * Metadata
+                  * Associated files array
+                - HTTP 200 OK status
+                
+Priority        Must-have
+
+Pre-condition   - Case ID exists in database
+                - Database connection is available
+                
+Post-condition  - User receives complete case information
+                - If case not found, HTTP 404 error is returned
+================================================================================
+
+Table 4: Filter Cases by Status
+--------------------------------------------------------------------------------
+FR-04           Filter Cases by Status
+--------------------------------------------------------------------------------
+Description     Users should be able to filter the case list by status to
+                view only cases in a specific state.
+                
+Input           - Status value (string: "queued", "processing", "completed", "failed")
+                - Page number (integer, optional)
+                - Items per page (integer, optional)
+                
+Output          - Filtered array of case objects matching status
+                - Pagination metadata
+                - HTTP 200 OK status
+                
+Priority        Should-have
+
+Pre-condition   - Status value is valid
+                - Database connection is available
+                
+Post-condition  - Only cases with matching status are returned
+                - Empty array if no matches found
+================================================================================
+
+Table 5: Search Cases
+--------------------------------------------------------------------------------
+FR-05           Search Cases
+--------------------------------------------------------------------------------
+Description     Users should be able to search for cases by name or ID to
+                quickly locate specific cases.
+                
+Input           - Search query (string: case name or case ID)
+                - Search type (string: "name" or "id")
+                
+Output          - Array of matching case objects
+                - Match count
+                - HTTP 200 OK status
+                
+Priority        Should-have
+
+Pre-condition   - Search query is not empty
+                - Database connection is available
+                
+Post-condition  - Cases matching search criteria are returned
+                - Search is case-insensitive for names
+                - Empty array if no matches
+================================================================================
+
+Table 6: Set Case Priority
+--------------------------------------------------------------------------------
+FR-06           Set Case Priority
+--------------------------------------------------------------------------------
+Description     Users should be able to assign priority levels (1-10) to cases,
+                with higher numbers indicating higher priority.
+                
+Input           - Case ID (integer, required)
+                - Priority value (integer, 1-10, required)
+                
+Output          - Updated case object
+                - Confirmation message
+                - HTTP 200 OK status
+                
+Priority        Should-have
+
+Pre-condition   - Case exists in database
+                - Priority value is between 1 and 10
+                
+Post-condition  - Case priority is updated in database
+                - updated_at timestamp is refreshed
+================================================================================
+
+Table 7: Track Case Status
+--------------------------------------------------------------------------------
+FR-07           Track Case Status
+--------------------------------------------------------------------------------
+Description     The system must track and display case status throughout the
+                analysis lifecycle (queued, processing, completed, failed).
+                
+Input           - Case ID (integer, required)
+                
+Output          - Current case status
+                - Last update timestamp
+                - HTTP 200 OK status
+                
+Priority        Must-have
+
+Pre-condition   - Case exists in database
+                
+Post-condition  - Current status is returned
+                - Status reflects actual job state
+================================================================================
+
+================================================================================
+2. FILE UPLOAD & MANAGEMENT
+================================================================================
+
+Table 8: Upload Memory Dump (Drag & Drop)
+--------------------------------------------------------------------------------
+FR-08           Upload Memory Dump (Drag & Drop)
+--------------------------------------------------------------------------------
+Description     Users must be able to upload memory dump files by dragging
+                them onto the designated drop zone in the UI.
+                
+Input           - Memory dump file (binary)
+                - File metadata (name, size, type)
+                - Case name (string)
+                - Case description (string, optional)
+                
+Output          - Case ID
+                - File upload confirmation
+                - Job ID for analysis
+                - HTTP 201 Created status
+                
+Priority        Must-have
+
+Pre-condition   - File format is supported (.raw, .mem, .vmem, .bin)
+                - File is not empty
+                - Drop zone is active
+                
+Post-condition  - File is stored in case directory
+                - Case record is created in database
+                - File metadata is stored
+                - Analysis job is enqueued
+                - SHA-256 checksum is calculated and stored
+================================================================================
+
+Table 9: Upload Memory Dump (File Browser)
+--------------------------------------------------------------------------------
+FR-09           Upload Memory Dump (File Browser)
+--------------------------------------------------------------------------------
+Description     Users must be able to upload memory dump files using a native
+                file browser dialog.
+                
+Input           - Memory dump file selected via file picker
+                - Case name (string)
+                - Case description (string, optional)
+                
+Output          - Case ID
+                - File upload confirmation
+                - Job ID for analysis
+                - HTTP 201 Created status
+                
+Priority        Must-have
+
+Pre-condition   - File format is supported (.raw, .mem, .vmem, .bin)
+                - File is not empty
+                - File picker is accessible
+                
+Post-condition  - File is stored in case directory
+                - Case record is created in database
+                - File metadata is stored
+                - Analysis job is enqueued
+                - SHA-256 checksum is calculated and stored
+================================================================================
+
+Table 10: Validate File Format
+--------------------------------------------------------------------------------
+FR-10           Validate File Format
+--------------------------------------------------------------------------------
+Description     The system must validate file extensions and reject unsupported
+                file formats with clear error messages.
+                
+Input           - File name (string)
+                - File extension (string)
+                
+Output          - Validation result (boolean: true/false)
+                - Error message if invalid
+                - HTTP 400 Bad Request if invalid
+                
+Priority        Must-have
+
+Pre-condition   - File is provided for upload
+                
+Post-condition  - Only files with valid extensions proceed to upload
+                - Invalid files are rejected with descriptive error
+================================================================================
+
+Table 11: Calculate File Checksum
+--------------------------------------------------------------------------------
+FR-11           Calculate File Checksum
+--------------------------------------------------------------------------------
+Description     The system must calculate SHA-256 checksums for all uploaded
+                files to ensure data integrity.
+                
+Input           - File path (string)
+                - File binary data
+                
+Output          - SHA-256 checksum (64-character hex string)
+                
+Priority        Must-have
+
+Pre-condition   - File exists on disk
+                - File is readable
+                
+Post-condition  - Checksum is calculated
+                - Checksum is stored in database
+                - File integrity can be verified later
+================================================================================
+
+Table 12: Store File Securely
+--------------------------------------------------------------------------------
+FR-12           Store File Securely
+--------------------------------------------------------------------------------
+Description     The system must store uploaded files in isolated, case-specific
+                directories with sanitized filenames.
+                
+Input           - Original file
+                - Case ID
+                - Original filename
+                
+Output          - Secure file path
+                - Storage confirmation
+                
+Priority        Must-have
+
+Pre-condition   - Case directory exists or can be created
+                - Sufficient disk space available
+                - Filename is sanitized
+                
+Post-condition  - File is stored at: data/cases/{case_id}/{sanitized_filename}
+                - File permissions are set appropriately
+                - File path is recorded in database
+================================================================================
+
+================================================================================
+3. MEMORY DUMP ANALYSIS
+================================================================================
+
+Table 13: Detect Memory Dump Format
+--------------------------------------------------------------------------------
+FR-13           Detect Memory Dump Format
+--------------------------------------------------------------------------------
+Description     The system must automatically detect the memory dump format
+                using magic bytes and file signatures.
+                
+Input           - Memory dump file path
+                - File binary header (first 16-4MB)
+                
+Output          - Detected format (string: Raw, EWF, AFF, LIME, VMware, etc.)
+                - Confidence score (HIGH/MEDIUM/LOW)
+                - Format details
+                
+Priority        Must-have
+
+Pre-condition   - File exists and is readable
+                - File size >= 1KB
+                
+Post-condition  - Format is identified or marked as "Unknown"
+                - Confidence level is provided
+                - Format information is logged
+================================================================================
+
+Table 14: Detect Operating System
+--------------------------------------------------------------------------------
+FR-14           Detect Operating System
+--------------------------------------------------------------------------------
+Description     The system must detect the operating system (Windows, Linux,
+                macOS) from the memory dump using heuristic analysis.
+                
+Input           - Memory dump file path
+                - File binary content sample
+                
+Output          - Detected OS (string: Windows/Linux/macOS/Unknown)
+                - OS version (if detectable)
+                - Confidence level (HIGH/MEDIUM/LOW)
+                
+Priority        Must-have
+
+Pre-condition   - File format is detected
+                - File is accessible
+                
+Post-condition  - OS is identified or marked as "Unknown"
+                - Appropriate Volatility profile is selected
+                - OS information is logged
+================================================================================
+
+Table 15: Execute Volatility Plugins
+--------------------------------------------------------------------------------
+FR-15           Execute Volatility Plugins
+--------------------------------------------------------------------------------
+Description     The system must execute Volatility3 plugins appropriate for
+                the detected operating system.
+                
+Input           - Memory dump file path
+                - Detected OS
+                - Plugin list (based on analysis profile)
+                
+Output          - Plugin execution results (JSON)
+                - Execution status for each plugin
+                - Error messages for failed plugins
+                
+Priority        Must-have
+
+Pre-condition   - Volatility3 is installed
+                - OS is detected
+                - File is accessible
+                
+Post-condition  - All plugins are executed
+                - Results are captured and parsed
+                - Failed plugins are logged
+                - Execution time is recorded
+================================================================================
+
+Table 16: Extract System Information
+--------------------------------------------------------------------------------
+FR-16           Extract System Information
+--------------------------------------------------------------------------------
+Description     The system must extract system information including OS version,
+                architecture, and kernel details from the memory dump.
+                
+Input           - Memory dump file path
+                - Volatility plugin outputs
+                
+Output          - OS version (string)
+                - Architecture (32-bit/64-bit)
+                - Kernel version
+                - System uptime (if available)
+                
+Priority        Must-have
+
+Pre-condition   - Volatility plugins executed successfully
+                - OS is detected
+                
+Post-condition  - System information is extracted
+                - Information is included in analysis report
+================================================================================
+
+Table 17: Extract Process List
+--------------------------------------------------------------------------------
+FR-17           Extract Process List
+--------------------------------------------------------------------------------
+Description     The system must extract a list of running processes with PIDs,
+                names, and parent-child relationships.
+                
+Input           - Memory dump file path
+                - Volatility pslist/pstree plugin output
+                
+Output          - Array of process objects containing:
+                  * PID (integer)
+                  * Process name (string)
+                  * Parent PID (integer)
+                  * Command line (string)
+                  * Start time (timestamp)
+                
+Priority        Must-have
+
+Pre-condition   - Volatility process plugins executed
+                - OS is detected
+                
+Post-condition  - Process list is extracted
+                - Parent-child relationships are mapped
+                - Process data is included in report
+================================================================================
+
+Table 18: Extract Network Connections
+--------------------------------------------------------------------------------
+FR-18           Extract Network Connections
+--------------------------------------------------------------------------------
+Description     The system must identify network connections including
+                established and listening connections with remote IPs and ports.
+                
+Input           - Memory dump file path
+                - Volatility network plugin outputs
+                
+Output          - Array of network connection objects:
+                  * Protocol (TCP/UDP)
+                  * Local address:port
+                  * Remote address:port
+                  * State (ESTABLISHED/LISTENING)
+                  * Associated PID
+                
+Priority        Must-have
+
+Pre-condition   - Volatility network plugins executed
+                - OS is detected
+                
+Post-condition  - Network connections are extracted
+                - Remote IPs are identified
+                - Connection data is included in report
+================================================================================
+
+Table 19: Identify Suspicious Processes
+--------------------------------------------------------------------------------
+FR-19           Identify Suspicious Processes
+--------------------------------------------------------------------------------
+Description     The system should identify suspicious processes such as
+                browsers, system tools, and unusual applications.
+                
+Input           - Process list
+                - Process metadata (paths, command lines)
+                
+Output          - Array of flagged processes
+                - Suspicion indicators
+                - Severity levels
+                
+Priority        Should-have
+
+Pre-condition   - Process list is extracted
+                - Detection rules are defined
+                
+Post-condition  - Suspicious processes are flagged
+                - Indicators are documented
+                - Findings are included in report
+================================================================================
+
+Table 20: Calculate File Hashes
+--------------------------------------------------------------------------------
+FR-20           Calculate File Hashes
+--------------------------------------------------------------------------------
+Description     The system should calculate file hashes (MD5, SHA1, SHA256)
+                for the memory dump with progress tracking.
+                
+Input           - Memory dump file path
+                
+Output          - MD5 hash (32-character hex string)
+                - SHA1 hash (40-character hex string)
+                - SHA256 hash (64-character hex string)
+                - Progress percentage
+                
+Priority        Should-have
+
+Pre-condition   - File exists and is readable
+                
+Post-condition  - All hashes are calculated
+                - Hashes are stored in report
+                - Progress is tracked and reported
+================================================================================
+
+================================================================================
+4. ASYNCHRONOUS JOB PROCESSING
+================================================================================
+
+Table 21: Enqueue Analysis Job
+--------------------------------------------------------------------------------
+FR-21           Enqueue Analysis Job
+--------------------------------------------------------------------------------
+Description     The system must enqueue analysis jobs to Redis Queue after
+                file upload, passing case_id as the job payload.
+                
+Input           - Case ID (integer)
+                - Job timeout (integer, default: 7200 seconds)
+                - Result TTL (integer, default: 86400 seconds)
+                
+Output          - Job ID (unique string)
+                - Job status ("queued")
+                - Enqueue confirmation
+                
+Priority        Must-have
+
+Pre-condition   - Redis connection is available
+                - Case exists in database
+                - File is uploaded and stored
+                
+Post-condition  - Job is added to Redis queue
+                - Job ID is returned to user
+                - Job metadata is stored
+================================================================================
+
+Table 22: Process Job Asynchronously
+--------------------------------------------------------------------------------
+FR-22           Process Job Asynchronously
+--------------------------------------------------------------------------------
+Description     The system must process jobs asynchronously using background
+                workers without blocking the API.
+                
+Input           - Job ID
+                - Case ID (from job payload)
+                
+Output          - Analysis results
+                - Updated case status
+                - Generated report
+                
+Priority        Must-have
+
+Pre-condition   - Job is in queue
+                - Worker is running
+                - Case and file exist
+                
+Post-condition  - Analysis is completed
+                - Case status is updated
+                - Report is generated and stored
+                - Job is marked as complete or failed
+================================================================================
+
+Table 23: Update Job Status
+--------------------------------------------------------------------------------
+FR-23           Update Job Status
+--------------------------------------------------------------------------------
+Description     The system must update case status to "processing" when job
+                starts and "completed"/"failed" when job finishes.
+                
+Input           - Case ID
+                - New status (string)
+                - Job execution details
+                
+Output          - Updated case record
+                - Status change timestamp
+                
+Priority        Must-have
+
+Pre-condition   - Case exists
+                - Status value is valid
+                
+Post-condition  - Case status is updated in database
+                - updated_at timestamp is refreshed
+                - Status change is logged
+================================================================================
+
+Table 24: Handle Job Failures
+--------------------------------------------------------------------------------
+FR-24           Handle Job Failures
+--------------------------------------------------------------------------------
+Description     The system must handle worker crashes and job failures
+                gracefully, logging errors and updating case status.
+                
+Input           - Job ID
+                - Error details
+                - Failure reason
+                
+Output          - Error log entry
+                - Case status set to "failed"
+                - Failure notification
+                
+Priority        Must-have
+
+Pre-condition   - Job encountered an error
+                - Worker is running
+                
+Post-condition  - Error is logged with details
+                - Case status is "failed"
+                - Failure is stored for 24 hours (TTL)
+                - User can view error details
+================================================================================
+
+Table 25: Query Job Status
+--------------------------------------------------------------------------------
+FR-25           Query Job Status
+--------------------------------------------------------------------------------
+Description     Users should be able to query job status independently using
+                the job ID.
+                
+Input           - Job ID (string)
+                
+Output          - Job status (queued/processing/completed/failed)
+                - Job progress (if available)
+                - Job result (if completed)
+                - Error details (if failed)
+                
+Priority        Should-have
+
+Pre-condition   - Job ID is valid
+                - Redis connection is available
+                
+Post-condition  - Current job status is returned
+                - Progress information is provided
+================================================================================
+
+================================================================================
+5. REPORTING & RESULTS
+================================================================================
+
+Table 26: Generate Analysis Report
+--------------------------------------------------------------------------------
+FR-26           Generate Analysis Report
+--------------------------------------------------------------------------------
+Description     The system must generate a comprehensive JSON report for each
+                completed analysis containing all findings.
+                
+Input           - Case ID
+                - Analysis results (all plugin outputs)
+                - File metadata
+                
+Output          - JSON report file
+                - Report file path
+                - Report generation timestamp
+                
+Priority        Must-have
+
+Pre-condition   - Analysis is completed
+                - Results are available
+                
+Post-condition  - Report file is created
+                - Report path is stored in database
+                - Report contains all analysis sections
+================================================================================
+
+Table 27: View Report
+--------------------------------------------------------------------------------
+FR-27           View Report
+--------------------------------------------------------------------------------
+Description     Users must be able to retrieve and view analysis reports
+                using the case ID.
+                
+Input           - Case ID (integer)
+                
+Output          - Complete report object (JSON)
+                - Report metadata
+                - HTTP 200 OK status
+                
+Priority        Must-have
+
+Pre-condition   - Case exists
+                - Report is generated (or placeholder available)
+                
+Post-condition  - User receives report data
+                - Report includes summary and detailed findings
+================================================================================
+
+Table 28: Export Report (JSON)
+--------------------------------------------------------------------------------
+FR-28           Export Report (JSON)
+--------------------------------------------------------------------------------
+Description     Users should be able to export reports in JSON format for
+                programmatic consumption.
+                
+Input           - Case ID (integer)
+                - Export format: "json"
+                
+Output          - JSON file download
+                - Content-Type: application/json
+                - HTTP 200 OK status
+                
+Priority        Should-have
+
+Pre-condition   - Report exists
+                - Case exists
+                
+Post-condition  - JSON file is downloaded
+                - File contains complete report data
+================================================================================
+
+Table 29: Export Report (PDF)
+--------------------------------------------------------------------------------
+FR-29           Export Report (PDF)
+--------------------------------------------------------------------------------
+Description     Users could be able to export reports in PDF format for
+                documentation and sharing.
+                
+Input           - Case ID (integer)
+                - Export format: "pdf"
+                
+Output          - PDF file download
+                - Content-Type: application/pdf
+                - HTTP 200 OK status
+                
+Priority        Could-have
+
+Pre-condition   - Report exists
+                - PDF generation library is available
+                
+Post-condition  - PDF file is downloaded
+                - PDF contains formatted report with charts
+================================================================================
+
+Table 30: View Analysis Summary
+--------------------------------------------------------------------------------
+FR-30           View Analysis Summary
+--------------------------------------------------------------------------------
+Description     The system should include an analysis summary in each report
+                showing key metrics and findings.
+                
+Input           - Case ID
+                - Analysis results
+                
+Output          - Summary object containing:
+                  * Total processes analyzed
+                  * Network connections found
+                  * Indicators identified
+                  * Severity distribution
+                  * Analysis duration
+                
+Priority        Should-have
+
+Pre-condition   - Analysis is completed
+                - Report is generated
+                
+Post-condition  - Summary is included in report
+                - Key metrics are calculated
+================================================================================
+
+================================================================================
+6. USER INTERFACE (DASHBOARD)
+================================================================================
+
+Table 31: View Dashboard Statistics
+--------------------------------------------------------------------------------
+FR-31           View Dashboard Statistics
+--------------------------------------------------------------------------------
+Description     Users must be able to view a dashboard displaying case
+                statistics (total cases, active cases, completed cases).
+                
+Input           - User session (implicit)
+                
+Output          - Dashboard statistics:
+                  * Total cases count
+                  * Active cases count
+                  * Completed cases count
+                  * Failed cases count
+                  * Recent cases list
+                
+Priority        Must-have
+
+Pre-condition   - User has access to dashboard
+                - Database connection is available
+                
+Post-condition  - Statistics are displayed
+                - Data is current and accurate
+================================================================================
+
+Table 32: Navigate Application Sections
+--------------------------------------------------------------------------------
+FR-32           Navigate Application Sections
+--------------------------------------------------------------------------------
+Description     Users must be able to navigate between different sections
+                (Dashboard, Upload, Reports, Settings) using sidebar navigation.
+                
+Input           - Navigation click/selection
+                - Target section
+                
+Output          - Section view is displayed
+                - Active navigation item is highlighted
+                
+Priority        Must-have
+
+Pre-condition   - Application is loaded
+                - User interface is rendered
+                
+Post-condition  - Requested section is displayed
+                - Navigation state is updated
+================================================================================
+
+Table 33: Receive Upload Confirmation
+--------------------------------------------------------------------------------
+FR-33           Receive Upload Confirmation
+--------------------------------------------------------------------------------
+Description     Users must receive immediate confirmation when a file is
+                successfully uploaded, including case ID and job ID.
+                
+Input           - Upload completion event
+                
+Output          - Success message
+                - Case ID
+                - Job ID
+                - Job status
+                
+Priority        Must-have
+
+Pre-condition   - File upload is completed
+                - Case is created
+                - Job is enqueued
+                
+Post-condition  - User sees confirmation message
+                - User can track job using provided IDs
+================================================================================
+
+Table 34: View Error Messages
+--------------------------------------------------------------------------------
+FR-34           View Error Messages
+--------------------------------------------------------------------------------
+Description     The system must display clear, descriptive error messages
+                when operations fail.
+                
+Input           - Error event
+                - Error details
+                
+Output          - Error message dialog/toast
+                - Error description
+                - Suggested action (if applicable)
+                
+Priority        Must-have
+
+Pre-condition   - An error has occurred
+                
+Post-condition  - User is informed of the error
+                - Error is logged
+                - User can take corrective action
+================================================================================
+
+Table 35: Paginate Case List
+--------------------------------------------------------------------------------
+FR-35           Paginate Case List
+--------------------------------------------------------------------------------
+Description     The system should provide pagination controls for navigating
+                large case lists with configurable items per page.
+                
+Input           - Page number
+                - Items per page (10, 25, 50, 100)
+                
+Output          - Paginated case list
+                - Pagination controls (prev, next, page numbers)
+                - Total count display
+                
+Priority        Should-have
+
+Pre-condition   - Cases exist in database
+                - UI is loaded
+                
+Post-condition  - Requested page is displayed
+                - Navigation controls are functional
+================================================================================
+
+================================================================================
+7. DATA PERSISTENCE & STORAGE
+================================================================================
+
+Table 36: Store Case Data in Database
+--------------------------------------------------------------------------------
+FR-36           Store Case Data in Database
+--------------------------------------------------------------------------------
+Description     The system must store all case data in PostgreSQL database
+                with proper indexing and referential integrity.
+                
+Input           - Case object
+                - File metadata
+                
+Output          - Database record
+                - Record ID
+                - Confirmation
+                
+Priority        Must-have
+
+Pre-condition   - Database connection is available
+                - Data is validated
+                
+Post-condition  - Data is persisted in database
+                - Indexes are updated
+                - Referential integrity is maintained
+================================================================================
+
+Table 37: Maintain Referential Integrity
+--------------------------------------------------------------------------------
+FR-37           Maintain Referential Integrity
+--------------------------------------------------------------------------------
+Description     The system must maintain referential integrity between cases
+                and their associated files using foreign key constraints.
+                
+Input           - Case ID
+                - File records
+                
+Output          - Linked records
+                - Integrity confirmation
+                
+Priority        Must-have
+
+Pre-condition   - Database schema is defined
+                - Foreign keys are configured
+                
+Post-condition  - Case-file relationships are enforced
+                - Orphan records are prevented
+                - Cascade delete is enabled
+================================================================================
+
+Table 38: Use Database Transactions
+--------------------------------------------------------------------------------
+FR-38           Use Database Transactions
+--------------------------------------------------------------------------------
+Description     The system must use database transactions to ensure data
+                consistency and enable rollback on errors.
+                
+Input           - Database operations (insert, update, delete)
+                
+Output          - Transaction commit or rollback
+                - Operation result
+                
+Priority        Must-have
+
+Pre-condition   - Database supports transactions
+                - Operations are defined
+                
+Post-condition  - All operations succeed (commit) or all fail (rollback)
+                - Data consistency is maintained
+================================================================================
+
+Table 39: Handle Redis Connection Failures
+--------------------------------------------------------------------------------
+FR-39           Handle Redis Connection Failures
+--------------------------------------------------------------------------------
+Description     The system should handle Redis connection failures gracefully
+                without affecting file uploads.
+                
+Input           - Redis connection attempt
+                
+Output          - Connection status
+                - Fallback behavior
+                - Warning message
+                
+Priority        Should-have
+
+Pre-condition   - Redis connection is attempted
+                
+Post-condition  - If Redis fails, upload still succeeds
+                - Job enqueue is skipped with warning
+                - Error is logged
+================================================================================
+
+================================================================================
+8. ERROR HANDLING & VALIDATION
+================================================================================
+
+Table 40: Validate API Request Parameters
+--------------------------------------------------------------------------------
+FR-40           Validate API Request Parameters
+--------------------------------------------------------------------------------
+Description     The system must validate all API request parameters before
+                processing to prevent invalid data.
+                
+Input           - API request parameters
+                - Validation rules
+                
+Output          - Validation result (pass/fail)
+                - Error messages for invalid parameters
+                - HTTP 400 Bad Request if invalid
+                
+Priority        Must-have
+
+Pre-condition   - API request is received
+                - Validation rules are defined
+                
+Post-condition  - Only valid requests are processed
+                - Invalid requests are rejected with clear errors
+================================================================================
+
+Table 41: Return Appropriate HTTP Status Codes
+--------------------------------------------------------------------------------
+FR-41           Return Appropriate HTTP Status Codes
+--------------------------------------------------------------------------------
+Description     The system must return appropriate HTTP status codes for all
+                API responses (200, 201, 400, 404, 500).
+                
+Input           - API operation result
+                
+Output          - HTTP status code
+                - Response body
+                
+Priority        Must-have
+
+Pre-condition   - API operation is completed
+                
+Post-condition  - Correct status code is returned
+                - Response matches status code semantics
+================================================================================
+
+Table 42: Provide Descriptive Error Messages
+--------------------------------------------------------------------------------
+FR-42           Provide Descriptive Error Messages
+--------------------------------------------------------------------------------
+Description     Users must receive descriptive error messages when operations
+                fail, explaining what went wrong and how to fix it.
+                
+Input           - Error event
+                - Error context
+                
+Output          - Error message (string)
+                - Error code (if applicable)
+                - Suggested resolution
+                
+Priority        Must-have
+
+Pre-condition   - An error has occurred
+                
+Post-condition  - User understands the error
+                - User knows how to resolve it
+================================================================================
+
+Table 43: Rollback Database Transactions on Errors
+--------------------------------------------------------------------------------
+FR-43           Rollback Database Transactions on Errors
+--------------------------------------------------------------------------------
+Description     The system must rollback database transactions when errors
+                occur to maintain data consistency.
+                
+Input           - Transaction operations
+                - Error event
+                
+Output          - Rollback confirmation
+                - Error log
+                
+Priority        Must-have
+
+Pre-condition   - Transaction is in progress
+                - Error is detected
+                
+Post-condition  - All transaction operations are reversed
+                - Database state is unchanged
+                - Error is logged
+================================================================================
+
+Table 44: Log All Errors with Timestamps
+--------------------------------------------------------------------------------
+FR-44           Log All Errors with Timestamps
+--------------------------------------------------------------------------------
+Description     The system must log all errors with timestamps, stack traces,
+                and context for debugging.
+                
+Input           - Error event
+                - Error details
+                - Execution context
+                
+Output          - Log entry
+                - Log file or database record
+                
+Priority        Must-have
+
+Pre-condition   - Logging system is configured
+                - Error is detected
+                
+Post-condition  - Error is logged with full details
+                - Log is accessible for debugging
+================================================================================
+
+================================================================================
+9. SECURITY & DATA INTEGRITY
+================================================================================
+
+Table 45: Sanitize Uploaded Filenames
+--------------------------------------------------------------------------------
+FR-45           Sanitize Uploaded Filenames
+--------------------------------------------------------------------------------
+Description     The system must sanitize all uploaded filenames to prevent
+                directory traversal attacks and file system issues.
+                
+Input           - Original filename (string)
+                
+Output          - Sanitized filename (string)
+                - Sanitization confirmation
+                
+Priority        Must-have
+
+Pre-condition   - File is being uploaded
+                - Filename is provided
+                
+Post-condition  - Filename contains only safe characters
+                - Path traversal sequences are removed
+                - File can be safely stored
+================================================================================
+
+Table 46: Verify File Checksums
+--------------------------------------------------------------------------------
+FR-46           Verify File Checksums
+--------------------------------------------------------------------------------
+Description     The system must verify file checksums to ensure data integrity
+                and detect corruption.
+                
+Input           - File path
+                - Stored checksum
+                
+Output          - Verification result (match/mismatch)
+                - Integrity status
+                
+Priority        Must-have
+
+Pre-condition   - File exists
+                - Checksum is stored
+                
+Post-condition  - File integrity is verified
+                - Corrupted files are detected
+================================================================================
+
+Table 47: Use Parameterized Database Queries
+--------------------------------------------------------------------------------
+FR-47           Use Parameterized Database Queries
+--------------------------------------------------------------------------------
+Description     The system must use parameterized database queries to prevent
+                SQL injection attacks.
+                
+Input           - Query parameters
+                - SQL query template
+                
+Output          - Safe query execution
+                - Query results
+                
+Priority        Must-have
+
+Pre-condition   - Database query is needed
+                - ORM or parameterization is available
+                
+Post-condition  - Query is executed safely
+                - SQL injection is prevented
+================================================================================
+
+================================================================================
+10. PERFORMANCE & SCALABILITY
+================================================================================
+
+Table 48: Process Files in Chunks
+--------------------------------------------------------------------------------
+FR-48           Process Files in Chunks
+--------------------------------------------------------------------------------
+Description     The system must process files in chunks (4KB) to avoid memory
+                overflow when calculating checksums or reading large files.
+                
+Input           - File path
+                - Chunk size (default: 4096 bytes)
+                
+Output          - Processed data
+                - Progress updates
+                
+Priority        Must-have
+
+Pre-condition   - File exists and is readable
+                
+Post-condition  - File is processed without memory issues
+                - Large files are handled efficiently
+================================================================================
+
+Table 49: Enforce Job Timeouts
+--------------------------------------------------------------------------------
+FR-49           Enforce Job Timeouts
+--------------------------------------------------------------------------------
+Description     The system must enforce job timeouts (2 hours default) to
+                prevent indefinite resource consumption.
+                
+Input           - Job configuration
+                - Timeout value (seconds)
+                
+Output          - Job completion or timeout
+                - Timeout notification
+                
+Priority        Must-have
+
+Pre-condition   - Job is enqueued
+                - Timeout is configured
+                
+Post-condition  - Job completes within timeout or is terminated
+                - Resources are freed
+                - Timeout is logged
+================================================================================
+
+Table 50: Support Parallel Plugin Execution
+--------------------------------------------------------------------------------
+FR-50           Support Parallel Plugin Execution
+--------------------------------------------------------------------------------
+Description     The system should support parallel plugin execution (up to 4
+                concurrent workers) for faster analysis.
+                
+Input           - Plugin list
+                - Max workers (default: 4)
+                
+Output          - Plugin results
+                - Execution time
+                
+Priority        Should-have
+
+Pre-condition   - Multiple plugins are configured
+                - System has sufficient resources
+                
+Post-condition  - Plugins execute in parallel
+                - Analysis time is reduced
+                - Results are aggregated correctly
+================================================================================
+
+================================================================================
+END OF FUNCTIONAL SPECIFICATION
+Total Requirements: 50 detailed specifications
+================================================================================

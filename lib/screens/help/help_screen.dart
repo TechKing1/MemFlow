@@ -76,7 +76,7 @@ class HelpScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const Text(
-            'MemForensics',
+            'MEMFLOW',
             style: TextStyle(
               fontSize: 32,
               fontWeight: FontWeight.bold,

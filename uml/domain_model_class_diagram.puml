@@ -1,0 +1,156 @@
+@startuml Memory Forensics - Domain Model (Simplified)
+
+!theme plain
+skinparam classAttributeIconSize 0
+skinparam backgroundColor #FFFFFF
+
+title Memory Forensics Automation Tool - Domain Model\n(Core Business Concepts)
+
+' ==================== CORE ENTITIES ====================
+
+class Case {
+    - id: Integer
+    - name: String
+    - description: String
+    - status: CaseStatus
+    - priority: Integer
+    - created_at: DateTime
+    - updated_at: DateTime
+}
+
+enum CaseStatus {
+    QUEUED
+    PROCESSING
+    COMPLETED
+    FAILED
+}
+
+class CaseFile {
+    - id: Integer
+    - file_path: String
+    - file_size: BigInteger
+    - checksum: String
+    - stored_at: DateTime
+}
+
+class MemoryDump {
+    - file_path: String
+    - format: DumpFormat
+    - operating_system: OperatingSystem
+    - size: BigInteger
+}
+
+enum DumpFormat {
+    RAW
+    EWF
+    LIME
+    VMWARE
+    UNKNOWN
+}
+
+enum OperatingSystem {
+    WINDOWS
+    LINUX
+    MACOS
+    UNKNOWN
+}
+
+' ==================== ANALYSIS RESULTS ====================
+
+class AnalysisReport {
+    - case_id: Integer
+    - generated_at: DateTime
+    - file_path: String
+}
+
+class SystemInfo {
+    + os_type: OperatingSystem
+    + os_version: String
+    + architecture: String
+}
+
+class Process {
+    + pid: Integer
+    + name: String
+    + parent_pid: Integer
+    + command_line: String
+    + is_suspicious: Boolean
+}
+
+class NetworkConnection {
+    + protocol: String
+    + local_address: String
+    + local_port: Integer
+    + remote_address: String
+    + remote_port: Integer
+    + state: String
+}
+
+class Indicator {
+    + type: String
+    + description: String
+    + severity: SeverityLevel
+    + confidence: Float
+}
+
+enum SeverityLevel {
+    CRITICAL
+    HIGH
+    MEDIUM
+    LOW
+    INFO
+}
+
+' ==================== JOB ====================
+
+class AnalysisJob {
+    + job_id: String
+    + case_id: Integer
+    + status: JobStatus
+    + created_at: DateTime
+}
+
+enum JobStatus {
+    QUEUED
+    PROCESSING
+    COMPLETED
+    FAILED
+}
+
+' ==================== RELATIONSHIPS ====================
+
+Case "1" *-- "1..*" CaseFile : contains
+Case --> CaseStatus : has
+Case "1" -- "0..1" AnalysisReport : produces
+Case "1" -- "0..1" AnalysisJob : has
+
+CaseFile "1" -- "1" MemoryDump : represents
+MemoryDump --> DumpFormat : has
+MemoryDump --> OperatingSystem : runs on
+
+AnalysisReport "1" *-- "1" SystemInfo : contains
+AnalysisReport "1" *-- "0..*" Process : lists
+AnalysisReport "1" *-- "0..*" NetworkConnection : lists
+AnalysisReport "1" *-- "0..*" Indicator : contains
+
+SystemInfo --> OperatingSystem : describes
+
+Process "1" -- "0..*" Process : parent-child
+Process "1" -- "0..*" NetworkConnection : owns
+
+Indicator --> SeverityLevel : has
+
+AnalysisJob --> JobStatus : has
+AnalysisJob --> Case : analyzes
+
+note right of Case
+    Central entity representing
+    a forensic investigation
+end note
+
+note right of AnalysisReport
+    Contains all findings from
+    memory dump analysis
+end note
+
+@enduml
