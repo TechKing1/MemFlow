@@ -23,13 +23,31 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 from enum import Enum
 
+# Rule engine (local module)
+try:
+    from rule_engine import RuleEngine, Severity as AlertSeverity
+    _RULE_ENGINE_AVAILABLE = True
+except ImportError:
+    _RULE_ENGINE_AVAILABLE = False
+
 # Constants
 BUFFER_SIZE = 65536
 HEURISTIC_SAMPLE_SIZE = 4_000_000  # Increased to 4MB for better detection
-DEFAULT_TIMEOUT = 300  # 5 minutes for volatility commands
+DEFAULT_TIMEOUT = 300  # 5 minutes for most volatility commands
+SLOW_PLUGIN_TIMEOUT = 90   # Cap for notoriously slow plugins on Windows
 MIN_FILE_SIZE = 1024  # 1KB minimum for memory dumps
 MAX_WORKERS = 4  # Parallel plugin execution
 DEFAULT_TERMINAL_WIDTH = 100  # Fallback if terminal width can't be detected
+
+# Per-plugin timeout overrides (seconds).
+# Plugins NOT listed here use DEFAULT_TIMEOUT.
+# windows.handles can enumerate 100k+ handle objects — cap it so it
+# doesn't stall the entire analysis run.
+PLUGIN_TIMEOUTS: Dict[str, int] = {
+    "windows.handles":  SLOW_PLUGIN_TIMEOUT,
+    "windows.filescan": SLOW_PLUGIN_TIMEOUT,
+    "windows.driverscan": SLOW_PLUGIN_TIMEOUT,
+}
 
 # ANSI Color Codes
 class ColorCode:
@@ -124,6 +142,7 @@ WINDOWS_PLUGINS = {
     ],
     'malware': [
         'windows.malfind',
+        'windows.psscan',
         'windows.dlllist',
         'windows.handles',
     ],
@@ -689,64 +708,79 @@ def run_vol(command: str, dump_path: str, timeout: int = DEFAULT_TIMEOUT,
         return None
 
 
-def run_vol_parallel(plugins: List[str], dump_path: str, 
+def run_vol_parallel(plugins: List[str], dump_path: str,
                      progress: Optional[ProgressTracker] = None,
                      max_workers: int = MAX_WORKERS) -> Dict[str, Optional[str]]:
     """
     Execute multiple Volatility plugins in parallel.
-    
+
     Args:
         plugins: List of plugin commands
         dump_path: Path to memory dump
         progress: Optional progress tracker
         max_workers: Maximum parallel workers
-        
+
     Returns:
-        Dictionary mapping plugin names to their outputs and failure reasons
+        Dictionary mapping plugin names to their outputs.
+        Special key '_failures' maps plugin → failure reason string.
+        Failure reason prefixes: 'TIMEOUT:', 'ERROR:', 'NO_DATA'
     """
-    results = {}
-    failures = {}  # Track failure reasons
-    
+    results  = {}
+    failures = {}  # plugin → reason string
+
+    def _run_with_timeout(plugin: str) -> Optional[str]:
+        """Run a single plugin using its per-plugin timeout."""
+        timeout = PLUGIN_TIMEOUTS.get(plugin, DEFAULT_TIMEOUT)
+        return run_vol(plugin, dump_path, timeout, silent=True)
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all plugin tasks
         future_to_plugin = {
-            executor.submit(run_vol, plugin, dump_path, DEFAULT_TIMEOUT, True): plugin
+            executor.submit(_run_with_timeout, plugin): plugin
             for plugin in plugins
         }
-        
+
         completed = 0
         total = len(plugins)
-        
-        # Collect results as they complete
+
         for future in as_completed(future_to_plugin):
             plugin = future_to_plugin[future]
             completed += 1
-            
+
             try:
                 output = future.result()
                 results[plugin] = output
-                
-                if progress:
-                    status = "✓" if output else "✗"
-                    # Truncate plugin name if needed to fit terminal
-                    plugin_display = plugin if len(plugin) <= 30 else plugin[:27] + "..."
-                    progress.update("Plugin Execution", completed, total, 
-                                  f"{status} {plugin_display} ({completed}/{total})")
-                
-                if not output:
-                    failures[plugin] = "No output returned"
-                    
+
+                if output:
+                    status_icon = "✓"
+                    # Distinguish: output that only has a header with no data rows
+                    data_lines = [l for l in output.splitlines()
+                                  if l.strip() and
+                                  not l.startswith("Volatility") and
+                                  not set(l.strip()) <= set("-= ")]
+                    if len(data_lines) <= 1:
+                        # Only header line — plugin ran but returned no rows
+                        status_icon = "⊘"
+                        failures[plugin] = "NO_DATA"
+                else:
+                    status_icon = "✗"
+                    failures[plugin] = "NO_DATA"
+
             except Exception as e:
+                err_str = str(e)
                 results[plugin] = None
-                failures[plugin] = str(e)
-                if progress:
-                    plugin_display = plugin if len(plugin) <= 30 else plugin[:27] + "..."
-                    progress.update("Plugin Execution", completed, total, 
-                                  f"✗ {plugin_display} ({completed}/{total})")
-    
-    # Store failures in results for later reporting
+                if "timed out" in err_str.lower() or "TimeoutExpired" in err_str:
+                    failures[plugin] = f"TIMEOUT:{PLUGIN_TIMEOUTS.get(plugin, DEFAULT_TIMEOUT)}s"
+                    status_icon = "⏱"
+                else:
+                    failures[plugin] = f"ERROR:{err_str[:80]}"
+                    status_icon = "✗"
+
+            if progress:
+                plugin_display = plugin if len(plugin) <= 30 else plugin[:27] + "..."
+                progress.update("Plugin Execution", completed, total,
+                                f"{status_icon} {plugin_display} ({completed}/{total})")
+
     results['_failures'] = failures
-    
     return results
 
 
@@ -1071,35 +1105,34 @@ def analyze_processes(processes: Optional[List[Dict[str, str]]]) -> Dict[str, An
     }
 
 
-def analyze_network(connections: Optional[List[Dict[str, str]]], 
-                   plugin_failed: bool = False,
+def analyze_network(connections: Optional[List[Dict[str, str]]],
+                   network_plugins_attempted: int = 0,
                    plugin_level: str = "essential") -> Dict[str, Any]:
-    """Analyze network connections with enhanced error reporting"""
-    if plugin_failed:
+    """Analyze network connections with enhanced error reporting."""
+
+    # Plugins were never scheduled at this analysis level
+    if network_plugins_attempted == 0:
         return {
-            "detected": False, 
+            "detected": False,
             "count": 0,
-            "failure_reason": "Network plugin execution failed",
-            "failure_type": "plugin_error"
+            "failure_reason": (
+                f"Network plugins not included at '{plugin_level}' level. "
+                f"Run with --level standard or higher."
+            ),
+            "failure_type": "not_included"
         }
-    
+
+    # Plugins were scheduled but all failed / returned nothing
     if not connections:
-        # Check if network plugins would be available at this level
-        if plugin_level == "essential":
-            return {
-                "detected": False, 
-                "count": 0,
-                "failure_reason": f"Network analysis not available at '{plugin_level}' level",
-                "suggestion": "Use --level standard or higher to include network analysis",
-                "failure_type": "not_included"
-            }
-        else:
-            return {
-                "detected": False, 
-                "count": 0,
-                "failure_reason": "No network data available (plugin may not be compatible with this dump)",
-                "failure_type": "no_data"
-            }
+        return {
+            "detected": False,
+            "count": 0,
+            "failure_reason": (
+                "Network plugins ran but returned no data. "
+                "The dump may predate netscan support, or the OS is unsupported."
+            ),
+            "failure_type": "no_data"
+        }
     
     # Categorize connections
     established = [c for c in connections if c.get("State") == "ESTABLISHED"]
@@ -1278,20 +1311,36 @@ def full_analysis(path: str,
     plugin_results = run_vol_parallel(plugins_to_run, path, progress)
     stage_timings['plugin_execution'] = time.time() - stage_start
     
-    # Extract failures and remove from results
-    failures = plugin_results.pop('_failures', {})
-    
-    # Count successful plugins
-    successful = sum(1 for v in plugin_results.values() if v is not None)
-    success_msg = f"\n[+] Completed: {successful}/{len(plugins_to_run)} plugins successful"
-    print(colorize(success_msg, ColorCode.GREEN if successful == len(plugins_to_run) else ColorCode.YELLOW, use_color) + 
-          colorize(f" [{format_elapsed_time(stage_timings['plugin_execution'])}]", ColorCode.GRAY, use_color))
-    
-    # Report failures if any
-    if failures:
-        print(colorize(f"[!] {len(failures)} plugin(s) failed:", ColorCode.YELLOW, use_color))
-        for plugin, reason in list(failures.items())[:3]:  # Show first 3
-            print(colorize(f"    - {plugin}: {reason[:60]}", ColorCode.RED, use_color))
+    # Extract failures from plugin_results before counting
+    failures   = plugin_results.pop('_failures', {})
+
+    # Count outcomes
+    timed_out  = sum(1 for r in failures.values() if r.startswith("TIMEOUT"))
+    errored    = sum(1 for r in failures.values() if r.startswith("ERROR"))
+    no_data    = sum(1 for r in failures.values() if r == "NO_DATA")
+    successful = len(plugins_to_run) - timed_out - errored
+
+    success_msg = (f"\n[+] Completed: {successful}/{len(plugins_to_run)} plugins successful"
+                   f" | {no_data} empty | {timed_out} timeout | {errored} error")
+    msg_color = (ColorCode.GREEN if timed_out == 0 and errored == 0
+                 else ColorCode.YELLOW)
+    print(colorize(success_msg, msg_color, use_color) +
+          colorize(f" [{format_elapsed_time(stage_timings['plugin_execution'])}]",
+                   ColorCode.GRAY, use_color))
+
+    # Warn specifically about timed-out plugins
+    if timed_out:
+        timed_plugins = [p for p, r in failures.items() if r.startswith("TIMEOUT")]
+        print(colorize(
+            f"[!] {timed_out} plugin(s) timed out (per-plugin cap applied): "
+            + ", ".join(timed_plugins),
+            ColorCode.YELLOW, use_color
+        ))
+    if errored:
+        err_plugins = [(p, r) for p, r in failures.items() if r.startswith("ERROR")]
+        print(colorize(f"[!] {errored} plugin(s) errored:", ColorCode.RED, use_color))
+        for plugin, reason in err_plugins[:3]:
+            print(colorize(f"    - {plugin}: {reason[6:66]}", ColorCode.RED, use_color))
     
     # Parse outputs
     progress.update("Analysis", 0, 5, "Parsing plugin outputs")
@@ -1319,13 +1368,10 @@ def full_analysis(path: str,
     process_analysis = analyze_processes(processes)
     
     progress.update("Analysis", 3, 5, "Analyzing network")
-    # Check if network plugins failed
-    network_plugin_failed = all(
-        plugin_results.get(p) is None 
-        for p in ['windows.netscan', 'windows.netstat', 'linux.sockstat', 'mac.netstat']
-        if p in plugins_to_run
-    )
-    network_analysis = analyze_network(network_connections, network_plugin_failed, plugin_level)
+    # Count how many network plugins were actually scheduled (may be zero at essential level)
+    _net_plugins = ['windows.netscan', 'windows.netstat', 'linux.sockstat', 'mac.netstat']
+    network_plugins_attempted = sum(1 for p in _net_plugins if p in plugins_to_run)
+    network_analysis = analyze_network(network_connections, network_plugins_attempted, plugin_level)
     
     progress.update("Analysis", 4, 5, "Compiling results")
     
@@ -1363,8 +1409,19 @@ def full_analysis(path: str,
             "windows_info": windows_info if windows_info else None,
             "process_list": processes if processes else None,
             "network_connections": network_connections if network_connections else None,
-            "plugins_attempted": {plugin: (result is not None) for plugin, result in plugin_results.items()}
+            "plugins_attempted": {
+                plugin: (
+                    "ok"      if plugin_results.get(plugin) and failures.get(plugin) != "NO_DATA"
+                    else "empty"   if failures.get(plugin) == "NO_DATA"
+                    else "timeout" if (failures.get(plugin) or "").startswith("TIMEOUT")
+                    else "error"   if (failures.get(plugin) or "").startswith("ERROR")
+                    else "no_output"
+                )
+                for plugin in plugin_results
+            }
         },
+        # Raw plugin text kept for rule engine and ML feature extraction
+        "_plugin_results_raw": plugin_results,
         "plugin_failures": failures if failures else None,
         "performance": {
             "total_time": time.time() - analysis_start_time,
@@ -1372,6 +1429,44 @@ def full_analysis(path: str,
         },
         "analysis_level": plugin_level  # Store for reference
     }
+
+    # Run the Rule Engine
+    progress.update("Finalization", 0, 1, "Running detection rules")
+    if _RULE_ENGINE_AVAILABLE:
+        try:
+            engine = RuleEngine()
+            detection_alerts = engine.run_all_rules(result)
+            alert_summary    = engine.summarize(detection_alerts)
+            result["detection_alerts"] = [a.to_dict() for a in detection_alerts]
+            result["alert_summary"]    = alert_summary
+
+            # Quick console banner for high/critical alerts found
+            # Flush/clear the \r progress line first so it doesn't bleed
+            term_w = get_terminal_width()
+            print(f"\r{' ' * term_w}\r", end="", flush=True)
+
+            critical = alert_summary.get("critical", 0)
+            high     = alert_summary.get("high", 0)
+            total    = alert_summary.get("total", 0)
+            if total > 0:
+                banner_color = ColorCode.RED if critical > 0 else ColorCode.YELLOW
+                print(colorize(
+                    f"[!] Rule Engine: {total} alert(s) found "
+                    f"[{critical} CRITICAL | {high} HIGH]",
+                    banner_color, use_color
+                ))
+            else:
+                print(colorize("\n[+] Rule Engine: No threats detected", ColorCode.GREEN, use_color))
+        except Exception as re_err:
+            print(colorize(f"\n[!] Rule engine error: {re_err}", ColorCode.YELLOW, use_color),
+                  file=sys.stderr)
+            result["detection_alerts"] = []
+            result["alert_summary"]    = {"total": 0, "error": str(re_err)}
+    else:
+        result["detection_alerts"] = []
+        result["alert_summary"]    = {"total": 0, "note": "rule_engine.py not found"}
+    # Remove internal key before returning
+    result.pop("_plugin_results_raw", None)
     
     progress.update("Finalization", 1, 1, "Analysis complete")
     
@@ -1640,7 +1735,13 @@ Examples:
 
 def _print_summary(result: Dict[str, Any], verbose: bool = False, use_color: bool = True) -> None:
     """Print formatted summary of analysis results with color support."""
-    
+    # Clear any dangling \r progress line before starting structured output
+    try:
+        tw = get_terminal_width()
+        print(f"\r{' ' * tw}\r", end="", flush=True)
+    except Exception:
+        pass
+
     try:
         # File Information
         print("[FILE INFORMATION]")
@@ -1716,25 +1817,53 @@ def _print_summary(result: Dict[str, Any], verbose: bool = False, use_color: boo
                 for ip in net_info["remote_ips"][:5]:
                     print(f"    - {ip}")
         elif net_info.get("failure_reason"):
+            failure_type = net_info.get("failure_type", "")
             print("\n[NETWORK ANALYSIS]")
             print("-" * 70)
-            print(colorize(f"  {net_info['failure_reason']}", ColorCode.YELLOW, use_color))
+            if failure_type == "not_included":
+                # Gray/info — plugins simply weren't run at this level
+                print(colorize(f"  ℹ  {net_info['failure_reason']}", ColorCode.GRAY, use_color))
+            else:
+                # Yellow/warn — plugins ran but produced no data
+                print(colorize(f"  ⚠  {net_info['failure_reason']}", ColorCode.YELLOW, use_color))
+
         
         # Plugin Statistics and Performance
         print("\n[ANALYSIS STATISTICS]")
         print("-" * 70)
         meta = result["analysis_metadata"]
-        print(f"  Plugins Executed: {meta['plugins_executed']}")
-        print(f"  Plugins Successful: {meta['plugins_successful']}")
-        print(f"  Analysis Level: {meta['plugin_level']}")
-        
+        print(f"  Analysis Level:     {meta['plugin_level']}")
+        print(f"  Plugins Executed:   {meta['plugins_executed']}")
+
+        # Per-plugin status table
+        plugins_attempted = result.get("raw_volatility_data", {}).get("plugins_attempted", {})
+        if plugins_attempted:
+            print(f"\n  {'Plugin':<35} {'Status':<12} {'Note'}")
+            print(f"  {'-'*34} {'-'*11} {'-'*20}")
+            status_icons = {
+                "ok":        colorize("✓  ok",      ColorCode.GREEN,  use_color),
+                "empty":     colorize("⊘  empty",   ColorCode.YELLOW, use_color),
+                "timeout":   colorize("⏱  timeout", ColorCode.YELLOW, use_color),
+                "error":     colorize("✗  error",   ColorCode.RED,    use_color),
+                "no_output": colorize("✗  no output", ColorCode.RED,  use_color),
+            }
+            for plugin, status in sorted(plugins_attempted.items()):
+                icon = status_icons.get(status, status)
+                note = ""
+                if status == "timeout":
+                    cap = PLUGIN_TIMEOUTS.get(plugin, DEFAULT_TIMEOUT)
+                    note = f"capped at {cap}s"
+                elif status == "empty":
+                    note = "ran OK — no data rows returned"
+                print(f"  {plugin:<35} {icon:<12} {colorize(note, ColorCode.GRAY, use_color)}")
+
         # Performance metrics
         if result.get("performance"):
             perf = result["performance"]
             total_time = perf.get("total_time", 0)
             print(f"\n  {colorize('Performance:', ColorCode.CYAN, use_color)}")
             print(f"    Total Time: {colorize(format_elapsed_time(total_time), ColorCode.GREEN, use_color)}")
-            
+
             if perf.get("stage_timings"):
                 timings = perf["stage_timings"]
                 if timings:
@@ -1742,9 +1871,48 @@ def _print_summary(result: Dict[str, Any], verbose: bool = False, use_color: boo
                     for stage, duration in timings.items():
                         stage_name = stage.replace('_', ' ').title()
                         print(f"      - {stage_name}: {format_elapsed_time(duration)}")
-        
+
+
         print(f"\n  Analysis Date: {meta['analysis_date']}")
         
+        # Detection Alerts from Rule Engine
+        alerts = result.get("detection_alerts", [])
+        summary = result.get("alert_summary", {})
+        if alerts:
+            print(colorize("\n[DETECTION ALERTS]", ColorCode.RED, use_color))
+            print("-" * 70)
+            sev_colors = {
+                "CRITICAL": ColorCode.BG_RED,
+                "HIGH":     ColorCode.RED,
+                "MEDIUM":   ColorCode.YELLOW,
+                "LOW":      ColorCode.CYAN,
+                "INFO":     ColorCode.GRAY,
+            }
+            for alert in alerts:
+                sev   = alert.get("severity", "INFO")
+                color = sev_colors.get(sev, ColorCode.WHITE)
+                badge = colorize(f" {sev} ", color, use_color)
+                print(f"\n  {badge} [{alert.get('id','?')}] {alert.get('title','')}")
+                print(f"  {alert.get('description','')}")
+                # Print abbreviated DFIR explanation (first 2 lines)
+                dfir_lines = alert.get("dfir_explanation", "").splitlines()
+                if dfir_lines:
+                    print(colorize(f"  ↳ {dfir_lines[0]}", ColorCode.GRAY, use_color))
+                    if len(dfir_lines) > 1:
+                        print(colorize(f"    {dfir_lines[1]}", ColorCode.GRAY, use_color))
+                evs = alert.get("evidence", [])
+                for ev in evs[:2]:
+                    print(colorize(f"    • {ev}", ColorCode.GRAY, use_color))
+            print(f"\n  Summary: {summary.get('total',0)} alert(s) — "
+                  f"{colorize(str(summary.get('critical',0))+' CRITICAL', ColorCode.BG_RED, use_color)}  "
+                  f"{colorize(str(summary.get('high',0))+' HIGH', ColorCode.RED, use_color)}  "
+                  f"{colorize(str(summary.get('medium',0))+' MEDIUM', ColorCode.YELLOW, use_color)}  "
+                  f"{colorize(str(summary.get('low',0))+' LOW', ColorCode.CYAN, use_color)}")
+        elif summary.get("total", -1) == 0:
+            print(colorize("\n[DETECTION ALERTS]", ColorCode.GREEN, use_color))
+            print("-" * 70)
+            print(colorize("  No threats detected by rule engine.", ColorCode.GREEN, use_color))
+
         # Show plugin failures if any
         if result.get("plugin_failures"):
             print(colorize("\n[PLUGIN FAILURES]", ColorCode.YELLOW, use_color))
