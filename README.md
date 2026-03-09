@@ -8,13 +8,13 @@ MemFlow combines a Python-based CLI analysis engine (powered by **Volatility3**)
 
 ## Features
 
-### 🔬 CLI Analysis Engine (`cli_tool/`)
+### CLI Analysis Engine (`cli_tool/`)
 - **Auto format detection** — Windows crash dump, ELF core, LiME, VMware, VirtualBox, raw
 - **Multi-OS support** — Windows, Linux, macOS memory dumps
 - **Parallel Volatility3 execution** — up to 4 plugins run concurrently with per-plugin timeouts
 - **Structured JSON output** — machine-readable reports for downstream tooling
 
-### 🛡️ Rule Engine — 10 Detection Rules
+### Rule Engine — 10 Detection Rules
 Each alert is tagged with **MITRE ATT&CK** technique IDs, names, tactics, and URLs.
 
 | ID | Rule | Severity | MITRE Techniques |
@@ -32,7 +32,7 @@ Each alert is tagged with **MITRE ATT&CK** technique IDs, names, tactics, and UR
 
 Rules are registered in `RULE_REGISTRY` — the foundation for future user-selectable rule sets.
 
-### 🖥️ Flutter Desktop UI (`lib/`)
+### Flutter Desktop UI (`lib/`)
 - Drag-and-drop memory dump ingestion
 - Native file picker for Windows, macOS, Linux
 - Dashboard designed for large desktop screens
