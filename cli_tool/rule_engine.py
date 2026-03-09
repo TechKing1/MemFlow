@@ -3,14 +3,19 @@
 MemFlow Rule Engine
 ===================
 Evaluates parsed Volatility3 plugin output and emits structured, severity-tagged
-detection alerts with DFIR-style explanations.
+detection alerts with DFIR-style explanations and MITRE ATT&CK technique mappings.
 
 Rules implemented:
-  1. Orphan Processes        - process whose PPID has no matching entry in pslist
-  2. Hidden Processes        - PID visible in psscan but absent from pslist
-  3. Injected Memory Regions - RWX VAD regions containing a PE header (malfind)
-  4. External Network Conns  - ESTABLISHED connections to non-RFC1918 remote IPs
-  5. Suspicious DLL Loading  - DLLs loaded from user-writable / temp / unusual paths
+  ORF-001  Orphan Processes             - PPID with no matching PID in pslist
+  HID-001  Hidden Processes (DKOM)      - PID in psscan but absent from pslist
+  INJ-001  Injected Memory Regions      - RWX VAD regions with PE header (malfind)
+  NET-001  External Network Connections - ESTABLISHED connections to public IPs
+  DLL-001  Suspicious DLL Load Paths    - DLLs from user-writable / temp paths
+  PROC-001 Process Masquerading         - system binary names via digit/letter swap
+  CMD-001  Suspicious PowerShell        - encoded commands, download cradles
+  SVC-001  Suspicious Service Paths     - services with binaries in temp/user dirs
+  PPID-001 Suspicious Parent-Child      - office/browser apps spawning shells
+  CRED-001 Credential Dumping           - known tools or LSASS-targeting patterns
 """
 
 import re
@@ -31,11 +36,52 @@ class Severity(str, Enum):
 
 
 class AlertCategory(str, Enum):
-    PROCESS = "Process"
-    MEMORY  = "Memory"
-    NETWORK = "Network"
-    MODULE  = "Module"
-    SYSTEM  = "System"
+    PROCESS     = "Process"
+    MEMORY      = "Memory"
+    NETWORK     = "Network"
+    MODULE      = "Module"
+    SYSTEM      = "System"
+    CREDENTIAL  = "Credential"
+    PERSISTENCE = "Persistence"
+
+
+# ---------------------------------------------------------------------------
+# MITRE ATT&CK helpers
+# ---------------------------------------------------------------------------
+
+def _mitre(tid: str, name: str, tactic: str) -> Dict[str, str]:
+    """Build a MITRE ATT&CK technique reference dict."""
+    parts = tid.split(".")
+    url = (f"https://attack.mitre.org/techniques/{parts[0]}/"
+           + (f"{parts[1]}/" if len(parts) > 1 else ""))
+    return {"id": tid, "name": name, "tactic": tactic, "url": url}
+
+
+# Technique lookup — reference with _T["T1055"] etc.
+_T: Dict[str, Dict[str, str]] = {
+    "T1055":     _mitre("T1055",     "Process Injection",                          "Defense Evasion"),
+    "T1055.012": _mitre("T1055.012", "Process Hollowing",                          "Defense Evasion"),
+    "T1134.004": _mitre("T1134.004", "Parent PID Spoofing",                        "Defense Evasion"),
+    "T1014":     _mitre("T1014",     "Rootkit",                                    "Defense Evasion"),
+    "T1564.001": _mitre("T1564.001", "Hide Artifacts: Hidden Files",               "Defense Evasion"),
+    "T1071.001": _mitre("T1071.001", "Application Layer Protocol: Web",            "Command and Control"),
+    "T1041":     _mitre("T1041",     "Exfiltration Over C2 Channel",               "Exfiltration"),
+    "T1048":     _mitre("T1048",     "Exfiltration Over Alternative Protocol",     "Exfiltration"),
+    "T1574.001": _mitre("T1574.001", "DLL Search Order Hijacking",                 "Persistence"),
+    "T1574.002": _mitre("T1574.002", "DLL Side-Loading",                           "Defense Evasion"),
+    "T1036":     _mitre("T1036",     "Masquerading",                               "Defense Evasion"),
+    "T1036.003": _mitre("T1036.003", "Rename System Utilities",                    "Defense Evasion"),
+    "T1036.005": _mitre("T1036.005", "Match Legitimate Name or Location",          "Defense Evasion"),
+    "T1059":     _mitre("T1059",     "Command and Scripting Interpreter",          "Execution"),
+    "T1059.001": _mitre("T1059.001", "PowerShell",                                 "Execution"),
+    "T1027":     _mitre("T1027",     "Obfuscated Files or Information",            "Defense Evasion"),
+    "T1140":     _mitre("T1140",     "Deobfuscate/Decode Files or Information",    "Defense Evasion"),
+    "T1543.003": _mitre("T1543.003", "Create or Modify System Process: Windows Service", "Persistence"),
+    "T1566.001": _mitre("T1566.001", "Spearphishing Attachment",                   "Initial Access"),
+    "T1204.002": _mitre("T1204.002", "User Execution: Malicious File",             "Execution"),
+    "T1003":     _mitre("T1003",     "OS Credential Dumping",                      "Credential Access"),
+    "T1003.001": _mitre("T1003.001", "OS Credential Dumping: LSASS Memory",        "Credential Access"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +90,7 @@ class AlertCategory(str, Enum):
 
 @dataclass
 class Alert:
-    """A single forensic detection alert."""
+    """A single forensic detection alert with MITRE ATT&CK mapping."""
     id:                 str              # Unique rule identifier, e.g. "ORF-001"
     severity:           Severity
     category:           AlertCategory
@@ -53,6 +99,8 @@ class Alert:
     dfir_explanation:   str              # Forensic context and investigation guidance
     evidence:           List[str]        # Raw strings that triggered the alert
     affected_artifacts: List[str]        # PIDs, IPs, DLL paths, etc.
+    mitre_techniques:   List[Dict[str, str]] = field(default_factory=list)
+    # Each element: {"id": "T1055", "name": "...", "tactic": "...", "url": "..."}
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -227,6 +275,7 @@ def detect_orphan_processes(
                     f"PPID {ppid} not found in active process list ({len(pid_set)} entries)",
                 ],
                 affected_artifacts=[f"PID:{pid}", f"PPID:{ppid}", name],
+                mitre_techniques=[_T["T1055"], _T["T1134.004"]],
             ))
 
     return alerts
@@ -299,6 +348,7 @@ def detect_hidden_processes(
                     f"PID {pid} absent from pslist ({len(pslist_pids)} processes)",
                 ],
                 affected_artifacts=[f"PID:{pid}", name],
+                mitre_techniques=[_T["T1014"], _T["T1564.001"]],
             ))
 
     return alerts
@@ -369,11 +419,13 @@ def detect_injected_memory(
         has_pe   = bool(pe_magic_re.search(text))
 
         if has_rwx and has_pe:
-            severity = Severity.CRITICAL
-            reason   = "RWX region with embedded PE header"
+            severity   = Severity.CRITICAL
+            reason     = "RWX region with embedded PE header"
+            techniques = [_T["T1055"], _T["T1055.012"]]
         elif has_rwx:
-            severity = Severity.HIGH
-            reason   = "RWX executable-writable region"
+            severity   = Severity.HIGH
+            reason     = "RWX executable-writable region"
+            techniques = [_T["T1055"]]
         else:
             continue  # benign or low-signal
 
@@ -410,6 +462,7 @@ def detect_injected_memory(
                 f"Flags: {'RWX' if has_rwx else ''}{'+ PE-header' if has_pe else ''}",
             ],
             affected_artifacts=[f"PID:{entry['pid']}", entry['name'], entry['address']],
+            mitre_techniques=techniques,
         ))
 
     return alerts
@@ -495,6 +548,7 @@ def detect_external_connections(
                 f"Owner={owner}  PID={pid}",
             ],
             affected_artifacts=[f"PID:{pid}", owner, foreign, ip],
+            mitre_techniques=[_T["T1071.001"], _T["T1041"], _T["T1048"]],
         ))
 
     return alerts
@@ -600,9 +654,498 @@ def detect_suspicious_dlls(
                     current_proc["name"],
                     dll_path,
                 ],
+                mitre_techniques=[_T["T1574.001"], _T["T1574.002"]],
             ))
 
     return alerts
+
+
+# ---------------------------------------------------------------------------
+# New rule baselines
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROCESS_PATHS: Dict[str, tuple] = {
+    "svchost.exe":   ("c:\\windows\\system32\\svchost.exe",),
+    "lsass.exe":     ("c:\\windows\\system32\\lsass.exe",),
+    "services.exe":  ("c:\\windows\\system32\\services.exe",),
+    "csrss.exe":     ("c:\\windows\\system32\\csrss.exe",),
+    "wininit.exe":   ("c:\\windows\\system32\\wininit.exe",),
+    "winlogon.exe":  ("c:\\windows\\system32\\winlogon.exe",),
+    "smss.exe":      ("c:\\windows\\system32\\smss.exe",),
+    "spoolsv.exe":   ("c:\\windows\\system32\\spoolsv.exe",),
+    "explorer.exe":  ("c:\\windows\\explorer.exe",),
+}
+_SYSTEM_BINARY_NAMES = set(_SYSTEM_PROCESS_PATHS.keys())
+
+_DOCUMENT_PARENT_NAMES = {
+    "winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe",
+    "acrord32.exe", "acrobat.exe", "wordpad.exe", "thunderbird.exe",
+    "wps.exe", "wpp.exe", "et.exe",
+}
+_BROWSER_NAMES = {
+    "iexplore.exe", "firefox.exe", "chrome.exe", "msedge.exe",
+    "opera.exe", "brave.exe",
+}
+_SHELL_TARGET_NAMES = {
+    "cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe",
+    "cscript.exe", "mshta.exe", "regsvr32.exe", "rundll32.exe",
+    "certutil.exe", "bitsadmin.exe",
+}
+
+_CRED_TOOL_NAMES = {
+    "mimikatz.exe", "wce.exe", "gsecdump.exe", "pwdump.exe",
+    "lazagne.exe", "fgdump.exe", "ntlmrelayx.exe", "responder.exe",
+}
+_CRED_CMDLINE_RE = [re.compile(p, re.IGNORECASE) for p in [
+    r"sekurlsa", r"lsadump", r"privilege::debug", r"logonpasswords",
+    r"procdump.*lsass", r"lsass.*-ma", r"comsvcs.*minidump",
+    r"out-minidump", r"minidump.*lsass",
+]]
+
+_SUSPICIOUS_PS_RE = [(re.compile(p, re.IGNORECASE), d) for p, d in [
+    (r"-[eE][nN][cC](?:odedCommand)?\s+[A-Za-z0-9+/=]{20,}", "Encoded command (-enc)"),
+    (r"(?:iex|invoke-expression)\s*[\(\s]",                    "Invoke-Expression (IEX)"),
+    (r"new-object\s+net\.webclient",                           "WebClient download cradle"),
+    (r"downloadstring|downloadfile|downloaddata",               "HTTP download method"),
+    (r"bitstransfer|start-bitstransfer",                       "BITS transfer (LOLBin)"),
+    (r"-nop(?:rofile)?\s+.*-w(?:indowstyle)?\s+hid",           "Hidden no-profile PS"),
+    (r"frombase64string|\[convert\]::frombase64",               "Base64 decode"),
+    (r"bypass.*executionpolicy|executionpolicy.*bypass",        "ExecutionPolicy bypass"),
+    (r"reflection\.assembly.*load",                             "In-memory assembly load"),
+]]
+
+_SUSPICIOUS_SVC_PATH_RE = [re.compile(p, re.IGNORECASE) for p in [
+    r"\\temp\\", r"\\tmp\\", r"\\appdata\\",
+    r"\\users\\.*\\downloads\\", r"\\users\\.*\\desktop\\",
+    r"\\recycle",
+]]
+
+
+# ---------------------------------------------------------------------------
+# New detection rules
+# ---------------------------------------------------------------------------
+
+def detect_process_masquerading(
+    processes: Optional[List[Dict[str, str]]],
+) -> List[Alert]:
+    """
+    RULE PROC-001: Process Masquerading
+    ------------------------------------
+    Detects processes impersonating system binaries via digit-for-letter
+    substitution (e.g. svch0st.exe → svchost.exe, lsasse.exe → lsass.exe).
+    """
+    if not processes:
+        return []
+
+    _digit_map = str.maketrans("0123456789", "oizeasgtbp")
+
+    def _norm(name: str) -> str:
+        return name.lower().translate(_digit_map)
+
+    _sys_norm = {_norm(n): n for n in _SYSTEM_BINARY_NAMES}
+    alerts: List[Alert] = []
+
+    for proc in processes:
+        name     = proc.get("ImageFileName", "")
+        name_low = name.lower()
+        if name_low in _SYSTEM_BINARY_NAMES or not name_low.endswith(".exe"):
+            continue
+        normed = _norm(name_low)
+        if normed in _sys_norm:
+            original = _sys_norm[normed]
+            pid  = proc.get("PID",  "?")
+            ppid = proc.get("PPID", "?")
+            alerts.append(Alert(
+                id="PROC-001",
+                severity=Severity.HIGH,
+                category=AlertCategory.PROCESS,
+                title="Process Name Masquerading (Typosquatting)",
+                description=(
+                    f"'{name}' (PID {pid}) impersonates '{original}' "
+                    f"via digit/letter substitution."
+                ),
+                dfir_explanation=(
+                    "Malware replaces letters with similar digits "
+                    "(0→o, 1→i/l) to mimic system process names.\n\n"
+                    "Investigator actions:\n"
+                    "  1. Check path: vol windows.cmdline --pid <PID>\n"
+                    "  2. Dump: vol windows.memmap --pid <PID> --dump\n"
+                    "  3. Submit hash to VirusTotal / sandbox."
+                ),
+                evidence=[
+                    f"Suspicious name: '{name}' (PID {pid}, PPID {ppid})",
+                    f"Resembles: '{original}' via digit substitution",
+                ],
+                affected_artifacts=[f"PID:{pid}", name],
+                mitre_techniques=[_T["T1036"], _T["T1036.005"]],
+            ))
+
+    return alerts
+
+
+def detect_suspicious_cmdline(
+    cmdline_output: Optional[str],
+) -> List[Alert]:
+    """
+    RULE CMD-001: Suspicious PowerShell Command-Line Arguments
+    ----------------------------------------------------------
+    Scans windows.cmdline for encoded/obfuscated PowerShell patterns,
+    download cradles, and living-off-the-land (LOTL) techniques.
+    """
+    if not cmdline_output:
+        return []
+
+    alerts: List[Alert] = []
+    seen: set = set()
+    ps_names = {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
+
+    for line in cmdline_output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("Volatility"):
+            continue
+        if not any(ps in line.lower() for ps in ps_names):
+            continue
+        for pattern_re, desc in _SUSPICIOUS_PS_RE:
+            if pattern_re.search(line):
+                snippet = line[:150]
+                if snippet in seen:
+                    continue
+                seen.add(snippet)
+                alerts.append(Alert(
+                    id="CMD-001",
+                    severity=Severity.HIGH,
+                    category=AlertCategory.PROCESS,
+                    title="Suspicious PowerShell Command-Line Detected",
+                    description=(
+                        f"Pattern '{desc}' in cmdline: "
+                        f"{line[:100]}{'...' if len(line) > 100 else ''}"
+                    ),
+                    dfir_explanation=(
+                        "Encoded/obfuscated PowerShell is a primary fileless malware "
+                        "delivery mechanism, bypassing AV signatures.\n\n"
+                        "Common chains: phishing macro → PS -enc → C2 beacon, "
+                        "or AMSI bypass → in-memory .NET assembly load.\n\n"
+                        "Investigator actions:\n"
+                        "  1. Decode the base64 payload and analyse statically\n"
+                        "  2. Check what spawned PowerShell (process tree)\n"
+                        "  3. Correlate network connections from the same PID."
+                    ),
+                    evidence=[f"Match: {desc}", f"Cmdline: {line[:200]}"],
+                    affected_artifacts=[line[:200]],
+                    mitre_techniques=[_T["T1059.001"], _T["T1027"], _T["T1140"]],
+                ))
+                break  # one alert per line
+
+    return alerts
+
+
+def detect_suspicious_services(
+    svcscan_output: Optional[str],
+) -> List[Alert]:
+    """
+    RULE SVC-001: Suspicious Service Binary Paths
+    ----------------------------------------------
+    Flags Windows services whose ImagePath resides in user-writable or
+    temporary directories. Legitimate services virtually always run from
+    System32, SysWOW64, or Program Files.
+    """
+    if not svcscan_output:
+        return []
+
+    alerts: List[Alert] = []
+    seen_paths: set = set()
+    header_seen = False
+
+    for line in svcscan_output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("Volatility"):
+            continue
+        if "ServiceName" in line and ("BinaryPath" in line or "Binary" in line):
+            header_seen = True
+            continue
+        if not header_seen:
+            continue
+
+        parts = re.split(r"\t+|\s{2,}", line)
+        if len(parts) < 4:
+            continue
+
+        binary_path = parts[-1].strip().lower()
+        svc_name    = parts[-3].strip() if len(parts) >= 3 else "?"
+
+        if not binary_path or binary_path in seen_paths:
+            continue
+        seen_paths.add(binary_path)
+
+        if binary_path.startswith(("c:\\windows\\", "c:\\program files")):
+            continue
+
+        for pat in _SUSPICIOUS_SVC_PATH_RE:
+            if pat.search(binary_path):
+                alerts.append(Alert(
+                    id="SVC-001",
+                    severity=Severity.HIGH,
+                    category=AlertCategory.PERSISTENCE,
+                    title="Suspicious Service Binary Path",
+                    description=(
+                        f"Service '{svc_name}' binary at unusual path: {binary_path}"
+                    ),
+                    dfir_explanation=(
+                        "Malware installs persistence via services with binaries "
+                        "in user-writable directories (Temp, AppData).\n\n"
+                        "Investigator actions:\n"
+                        "  1. Check service details: vol windows.svcscan\n"
+                        "  2. Hash the binary and submit to VirusTotal\n"
+                        "  3. Examine service start type and dependencies."
+                    ),
+                    evidence=[f"Service: {svc_name}", f"Binary path: {binary_path}"],
+                    affected_artifacts=[svc_name, binary_path],
+                    mitre_techniques=[_T["T1543.003"], _T["T1574.001"]],
+                ))
+                break
+
+    return alerts
+
+
+def detect_suspicious_parent_child(
+    processes: Optional[List[Dict[str, str]]],
+) -> List[Alert]:
+    """
+    RULE PPID-001: Suspicious Parent-Child Process Relationships
+    -------------------------------------------------------------
+    Flags unusual spawning patterns: Office/PDF apps or browsers spawning
+    command interpreters, script engines, or dual-use LOLBins.
+    Classic indicator of malicious macro or drive-by download execution.
+    """
+    if not processes:
+        return []
+
+    pid_to_proc: Dict[int, Dict] = {}
+    for proc in processes:
+        pid_str = proc.get("PID", "")
+        if pid_str.isdigit():
+            pid_to_proc[int(pid_str)] = proc
+
+    alerts: List[Alert] = []
+
+    for proc in processes:
+        name     = proc.get("ImageFileName", "").lower()
+        pid_str  = proc.get("PID",  "?")
+        ppid_str = proc.get("PPID", "")
+
+        if name not in _SHELL_TARGET_NAMES:
+            continue
+
+        try:
+            ppid = int(ppid_str)
+        except ValueError:
+            continue
+
+        parent = pid_to_proc.get(ppid)
+        if not parent:
+            continue
+
+        parent_name = parent.get("ImageFileName", "").lower()
+        parent_pid  = parent.get("PID", "?")
+
+        if parent_name in _DOCUMENT_PARENT_NAMES:
+            sev     = Severity.HIGH
+            context = "document/office application"
+        elif parent_name in _BROWSER_NAMES:
+            sev     = Severity.MEDIUM
+            context = "browser"
+        else:
+            continue
+
+        alerts.append(Alert(
+            id="PPID-001",
+            severity=sev,
+            category=AlertCategory.PROCESS,
+            title="Suspicious Parent-Child Process Relationship",
+            description=(
+                f"'{name}' (PID {pid_str}) spawned by {context} "
+                f"'{parent_name}' (PID {parent_pid})."
+            ),
+            dfir_explanation=(
+                "Office apps and browsers spawning command interpreters is a "
+                "classic indicator of malicious macro execution or drive-by download.\n\n"
+                "Typical chains:\n"
+                "  • Phishing .docx with VBA macro → cmd.exe → powershell\n"
+                "  • Malicious PDF → acrobat → wscript → JS dropper\n"
+                "  • Browser exploit → chrome → cmd → payload\n\n"
+                "Investigator actions:\n"
+                "  1. Dump process: vol windows.memmap --pid <PID> --dump\n"
+                "  2. Check cmdline: vol windows.cmdline --pid <PID>\n"
+                "  3. Look for dropped files via windows.filescan."
+            ),
+            evidence=[
+                f"Child:  '{name}' (PID {pid_str})",
+                f"Parent: '{parent_name}' (PID {parent_pid})",
+            ],
+            affected_artifacts=[f"PID:{pid_str}", name, f"PID:{parent_pid}", parent_name],
+            mitre_techniques=[_T["T1566.001"], _T["T1204.002"], _T["T1059"]],
+        ))
+
+    return alerts
+
+
+def detect_credential_dumping(
+    processes: Optional[List[Dict[str, str]]],
+    cmdline_output: Optional[str] = None,
+) -> List[Alert]:
+    """
+    RULE CRED-001: Credential Dumping Indicators
+    ---------------------------------------------
+    Detects known credential harvesting tools by process name and
+    suspicious cmdline patterns targeting LSASS memory.
+    """
+    alerts: List[Alert] = []
+
+    # --- (a) Known credential tool names in process list ---
+    if processes:
+        for proc in processes:
+            name = proc.get("ImageFileName", "")
+            pid  = proc.get("PID", "?")
+            if name.lower() in _CRED_TOOL_NAMES:
+                alerts.append(Alert(
+                    id="CRED-001",
+                    severity=Severity.CRITICAL,
+                    category=AlertCategory.CREDENTIAL,
+                    title="Known Credential Dumping Tool Detected",
+                    description=(
+                        f"Process '{name}' (PID {pid}) is a known "
+                        f"credential harvesting tool."
+                    ),
+                    dfir_explanation=(
+                        "Credential dumping tools extract hashes and plaintext "
+                        "credentials from LSASS memory, SAM, or Active Directory.\n\n"
+                        "Investigator actions:\n"
+                        "  1. Dump process: vol windows.memmap --pid <PID> --dump\n"
+                        "  2. Check cmdline targets: vol windows.cmdline\n"
+                        "  3. Review LSASS handles: vol windows.handles\n"
+                        "  4. Assume credentials compromised — rotate immediately."
+                    ),
+                    evidence=[f"Process '{name}' (PID {pid}) in known tool list"],
+                    affected_artifacts=[f"PID:{pid}", name],
+                    mitre_techniques=[_T["T1003"], _T["T1003.001"]],
+                ))
+
+    # --- (b) Cmdline patterns targeting LSASS ---
+    if cmdline_output:
+        seen: set = set()
+        for line in cmdline_output.splitlines():
+            line = line.strip()
+            if not line or line.startswith("Volatility"):
+                continue
+            for cre in _CRED_CMDLINE_RE:
+                if cre.search(line):
+                    snippet = line[:150]
+                    if snippet in seen:
+                        continue
+                    seen.add(snippet)
+                    alerts.append(Alert(
+                        id="CRED-001",
+                        severity=Severity.CRITICAL,
+                        category=AlertCategory.CREDENTIAL,
+                        title="Credential Dumping Command-Line Pattern",
+                        description=(
+                            f"LSASS-targeting pattern in cmdline: "
+                            f"{line[:100]}{'...' if len(line) > 100 else ''}"
+                        ),
+                        dfir_explanation=(
+                            "Commands targeting LSASS (e.g., procdump -ma lsass, "
+                            "comsvcs MiniDump, mimikatz sekurlsa) dump credential "
+                            "material from process memory.\n\n"
+                            "Investigator actions:\n"
+                            "  1. Identify the parent process\n"
+                            "  2. Check for output files via windows.filescan\n"
+                            "  3. Treat all domain credentials as compromised."
+                        ),
+                        evidence=[f"Cmdline: {line[:200]}"],
+                        affected_artifacts=[line[:200]],
+                        mitre_techniques=[_T["T1003"], _T["T1003.001"]],
+                    ))
+                    break
+
+    return alerts
+
+
+# ---------------------------------------------------------------------------
+# Rule Registry  (foundation for future user-selectable rules)
+# ---------------------------------------------------------------------------
+
+RULE_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "ORF-001": {
+        "name":        "Orphan Processes",
+        "description": "Process whose PPID has no matching entry in the active process list.",
+        "category":    AlertCategory.PROCESS,
+        "enabled":     True,
+        "mitre_ids":   ["T1055", "T1134.004"],
+    },
+    "HID-001": {
+        "name":        "Hidden Processes (DKOM)",
+        "description": "PID visible in psscan but absent from pslist — classic DKOM rootkit.",
+        "category":    AlertCategory.PROCESS,
+        "enabled":     True,
+        "mitre_ids":   ["T1014", "T1564.001"],
+    },
+    "INJ-001": {
+        "name":        "Injected Memory Regions",
+        "description": "RWX VAD regions with PE header; process injection / hollowing.",
+        "category":    AlertCategory.MEMORY,
+        "enabled":     True,
+        "mitre_ids":   ["T1055", "T1055.012"],
+    },
+    "NET-001": {
+        "name":        "External Network Connections",
+        "description": "ESTABLISHED connections to public IPs; possible C2 or exfiltration.",
+        "category":    AlertCategory.NETWORK,
+        "enabled":     True,
+        "mitre_ids":   ["T1071.001", "T1041", "T1048"],
+    },
+    "DLL-001": {
+        "name":        "Suspicious DLL Load Paths",
+        "description": "DLLs loaded from user-writable / temp directories.",
+        "category":    AlertCategory.MODULE,
+        "enabled":     True,
+        "mitre_ids":   ["T1574.001", "T1574.002"],
+    },
+    "PROC-001": {
+        "name":        "Process Masquerading",
+        "description": "System binary names with digit/letter substitution (typosquatting).",
+        "category":    AlertCategory.PROCESS,
+        "enabled":     True,
+        "mitre_ids":   ["T1036", "T1036.005"],
+    },
+    "CMD-001": {
+        "name":        "Suspicious PowerShell Command Lines",
+        "description": "Encoded/obfuscated PowerShell, download cradles, AMSI bypass.",
+        "category":    AlertCategory.PROCESS,
+        "enabled":     True,
+        "mitre_ids":   ["T1059.001", "T1027", "T1140"],
+    },
+    "SVC-001": {
+        "name":        "Suspicious Service Binary Paths",
+        "description": "Service binaries in Temp/AppData or other user-writable paths.",
+        "category":    AlertCategory.PERSISTENCE,
+        "enabled":     True,
+        "mitre_ids":   ["T1543.003", "T1574.001"],
+    },
+    "PPID-001": {
+        "name":        "Suspicious Parent-Child Processes",
+        "description": "Office/browser apps spawning shells — macro or drive-by indicator.",
+        "category":    AlertCategory.PROCESS,
+        "enabled":     True,
+        "mitre_ids":   ["T1566.001", "T1204.002", "T1059"],
+    },
+    "CRED-001": {
+        "name":        "Credential Dumping Indicators",
+        "description": "Known cred tools or LSASS-targeting cmdline patterns.",
+        "category":    AlertCategory.CREDENTIAL,
+        "enabled":     True,
+        "mitre_ids":   ["T1003", "T1003.001"],
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -617,11 +1160,30 @@ class RuleEngine:
         engine = RuleEngine()
         alerts = engine.run_all_rules(analysis_result)
         summary = engine.summarize(alerts)
+
+    Rule selection (preview of upcoming per-user selection feature):
+        engine = RuleEngine(enabled_rules={"ORF-001", "NET-001", "CRED-001"})
     """
+
+    def __init__(self, enabled_rules: Optional[set] = None) -> None:
+        """
+        Args:
+            enabled_rules: Optional set of rule IDs to run.
+                           Defaults to all rules marked enabled=True in RULE_REGISTRY.
+        """
+        if enabled_rules is not None:
+            self._enabled = enabled_rules
+        else:
+            self._enabled = {
+                rid for rid, meta in RULE_REGISTRY.items() if meta.get("enabled", True)
+            }
+
+    def _rule_enabled(self, rule_id: str) -> bool:
+        return rule_id in self._enabled
 
     def run_all_rules(self, result: Dict[str, Any]) -> List[Alert]:
         """
-        Run every detection rule using data from the full_analysis() output.
+        Run every enabled detection rule using data from the full_analysis() output.
 
         Args:
             result: The dict returned by full_analysis()
@@ -631,29 +1193,41 @@ class RuleEngine:
         """
         alerts: List[Alert] = []
 
-        raw = result.get("raw_volatility_data", {})
-        plugin_results = result.get("_plugin_results_raw", {})  # set by integration
+        raw            = result.get("raw_volatility_data", {})
+        plugin_results = result.get("_plugin_results_raw", {})
+        processes      = raw.get("process_list") or []
+        network_conns  = raw.get("network_connections") or []
 
-        # --- 1. Orphan Processes ---
-        processes = raw.get("process_list") or []
-        alerts.extend(detect_orphan_processes(processes))
-
-        # --- 2. Hidden Processes ---
         pslist_raw  = plugin_results.get("windows.pslist")
         psscan_raw  = plugin_results.get("windows.psscan")
-        alerts.extend(detect_hidden_processes(pslist_raw, psscan_raw))
-
-        # --- 3. Injected Memory ---
         malfind_raw = plugin_results.get("windows.malfind")
-        alerts.extend(detect_injected_memory(malfind_raw))
-
-        # --- 4. External Network Connections ---
-        network_conns = raw.get("network_connections") or []
-        alerts.extend(detect_external_connections(network_conns))
-
-        # --- 5. Suspicious DLLs ---
         dlllist_raw = plugin_results.get("windows.dlllist")
-        alerts.extend(detect_suspicious_dlls(dlllist_raw))
+        cmdline_raw = plugin_results.get("windows.cmdline")
+        svcscan_raw = plugin_results.get("windows.svcscan")
+
+        # --- Existing rules ---
+        if self._rule_enabled("ORF-001"):
+            alerts.extend(detect_orphan_processes(processes))
+        if self._rule_enabled("HID-001"):
+            alerts.extend(detect_hidden_processes(pslist_raw, psscan_raw))
+        if self._rule_enabled("INJ-001"):
+            alerts.extend(detect_injected_memory(malfind_raw))
+        if self._rule_enabled("NET-001"):
+            alerts.extend(detect_external_connections(network_conns))
+        if self._rule_enabled("DLL-001"):
+            alerts.extend(detect_suspicious_dlls(dlllist_raw))
+
+        # --- New rules ---
+        if self._rule_enabled("PROC-001"):
+            alerts.extend(detect_process_masquerading(processes))
+        if self._rule_enabled("CMD-001"):
+            alerts.extend(detect_suspicious_cmdline(cmdline_raw))
+        if self._rule_enabled("SVC-001"):
+            alerts.extend(detect_suspicious_services(svcscan_raw))
+        if self._rule_enabled("PPID-001"):
+            alerts.extend(detect_suspicious_parent_child(processes))
+        if self._rule_enabled("CRED-001"):
+            alerts.extend(detect_credential_dumping(processes, cmdline_raw))
 
         # Sort: CRITICAL → HIGH → MEDIUM → LOW → INFO
         severity_order = {
@@ -664,7 +1238,6 @@ class RuleEngine:
             Severity.INFO:     4,
         }
         alerts.sort(key=lambda a: severity_order.get(a.severity, 99))
-
         return alerts
 
     def summarize(self, alerts: List[Alert]) -> Dict[str, Any]:
