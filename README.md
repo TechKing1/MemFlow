@@ -1,181 +1,163 @@
-<<<<<<< HEAD
-# Memory Forensics Automation Tool
+# MemFlow
 
-A modern Flutter Desktop application for memory dump analysis and forensics automation.
+> Memory forensics automation — CLI analysis engine + Flutter desktop UI
+
+MemFlow combines a Python-based CLI analysis engine (powered by **Volatility3**) with a cross-platform **Flutter desktop application**. Drop a memory dump in and get back format detection, OS fingerprinting, threat detection with **MITRE ATT&CK** mappings, and a structured JSON report.
+
+---
 
 ## Features
 
-- **Clean, Modern Dashboard**: Optimized for large desktop screens (Windows, macOS, Linux)
-- **Drag & Drop Support**: Drag memory dump files directly onto the drop zone
-- **File Browser**: Browse and select memory dump files using native file picker
-- **Supported Formats**: `.raw`, `.mem`, `.vmem`, `.bin`
-- **Real-time Feedback**: Visual feedback on hover and file selection
-- **Light Theme**: Clean, professional UI with blue accent colors
-  
-## Status
-Active development — core modules under construction.
+### 🔬 CLI Analysis Engine (`cli_tool/`)
+- **Auto format detection** — Windows crash dump, ELF core, LiME, VMware, VirtualBox, raw
+- **Multi-OS support** — Windows, Linux, macOS memory dumps
+- **Parallel Volatility3 execution** — up to 4 plugins run concurrently with per-plugin timeouts
+- **Structured JSON output** — machine-readable reports for downstream tooling
+
+### 🛡️ Rule Engine — 10 Detection Rules
+Each alert is tagged with **MITRE ATT&CK** technique IDs, names, tactics, and URLs.
+
+| ID | Rule | Severity | MITRE Techniques |
+|----|------|----------|-----------------|
+| ORF-001 | Orphan Process | HIGH | T1055, T1134.004 |
+| HID-001 | Hidden Process (DKOM) | CRITICAL | T1014, T1564.001 |
+| INJ-001 | Injected Memory Region | CRITICAL/HIGH | T1055, T1055.012 |
+| NET-001 | External Network Connection | CRITICAL/HIGH | T1071.001, T1041, T1048 |
+| DLL-001 | Suspicious DLL Load Path | HIGH | T1574.001, T1574.002 |
+| PROC-001 | Process Masquerading | HIGH | T1036, T1036.005 |
+| CMD-001 | Suspicious PowerShell | HIGH | T1059.001, T1027, T1140 |
+| SVC-001 | Suspicious Service Path | HIGH | T1543.003, T1574.001 |
+| PPID-001 | Suspicious Parent-Child | HIGH/MEDIUM | T1566.001, T1204.002, T1059 |
+| CRED-001 | Credential Dumping | CRITICAL | T1003, T1003.001 |
+
+Rules are registered in `RULE_REGISTRY` — the foundation for future user-selectable rule sets.
+
+### 🖥️ Flutter Desktop UI (`lib/`)
+- Drag-and-drop memory dump ingestion
+- Native file picker for Windows, macOS, Linux
+- Dashboard designed for large desktop screens
+
+---
 
 ## Project Structure
 
 ```
-lib/
-├── main.dart              # Main application entry point and dashboard UI
-pubspec.yaml              # Project dependencies
+MemFlow/
+├── cli_tool/
+│   ├── memflow-cli_v2.py    # CLI entry point & full analysis workflow
+│   ├── rule_engine.py       # Detection rules + MITRE ATT&CK mapping
+│   └── test_rule_engine.py  # Unit tests (44 tests)
+├── lib/                     # Flutter application source
+├── BackEnd/                 # Flask/backend integration layer
+└── uml/                     # Architecture diagrams
 ```
 
-## Setup Instructions
+---
 
-### Prerequisites
+## Requirements
 
-- Flutter SDK (3.10.1 or higher)
-- Dart SDK (included with Flutter)
-- A desktop platform: Windows, macOS, or Linux
+### CLI Engine
+- Python 3.8+
+- [Volatility3](https://github.com/volatilityfoundation/volatility3) — must be on `PATH` or installed as a module
 
-### Installation
+### Flutter UI
+- Flutter SDK 3.10+
+- Desktop target: Windows, macOS, or Linux
 
-1. **Clone or navigate to the project directory**:
-   ```bash
-   cd c:\Users\oem\StudioProjects\memoryforensics
-   ```
+---
 
-2. **Get Flutter dependencies**:
-   ```bash
-   flutter pub get
-   ```
+## CLI Quick Start
 
-3. **Enable desktop support** (if not already enabled):
-   ```bash
-   flutter config --enable-windows-desktop
-   flutter config --enable-macos-desktop
-   flutter config --enable-linux-desktop
-   ```
+### Full Analysis
+```bash
+python cli_tool/memflow-cli_v2.py full memory.dmp
+```
 
-## Running the Application
+### With JSON Report + Advanced Plugins
+```bash
+python cli_tool/memflow-cli_v2.py full memory.dmp --level advanced --json report.json
+```
 
-### Windows
+### Quick Scan (format + OS detection only)
+```bash
+python cli_tool/memflow-cli_v2.py quick memory.dmp
+```
+
+### Format Detection Only
+```bash
+python cli_tool/memflow-cli_v2.py detect memory.dmp
+```
+
+### Analysis Levels
+
+| Level | Plugins | Use Case |
+|-------|---------|----------|
+| `essential` | pslist, info, cmdline, pstree | Fast triage |
+| `standard` | + netscan, netstat | Network visibility |
+| `advanced` | + malfind, dlllist, handles, psscan, svcscan | Malware hunting |
+| `full` | + filescan, driverscan, modscan, registry | Deep-dive forensics |
+
+---
+
+## Sample Output
+
+```
+[DETECTION ALERTS]
+----------------------------------------------------------------------
+ CRITICAL  [HID-001] Hidden Process (DKOM Rootkit Indicator)
+  Process 'rootkit.exe' (PID 1337) found in psscan but absent from pslist.
+  ↳ A process unlinked from ActiveProcessLinks — classic DKOM technique.
+    • PID 1337 present in psscan
+    • PID 1337 absent from pslist (52 processes)
+
+ HIGH  [PPID-001] Suspicious Parent-Child Process Relationship
+  'powershell.exe' (PID 4120) spawned by document/office application
+  'winword.exe' (PID 2440).
+  ↳ Office apps spawning command interpreters — typical macro/phishing indicator.
+
+  Summary: 2 alert(s) — 1 CRITICAL  1 HIGH  0 MEDIUM  0 LOW
+```
+
+---
+
+## Running Tests
 
 ```bash
-flutter run -d windows
+python cli_tool/test_rule_engine.py
+# or
+python -m pytest cli_tool/test_rule_engine.py -v
 ```
 
-### macOS
+**44 tests**, covering all 10 detection rules with MITRE technique assertions.
+
+---
+
+## Flutter UI Setup
 
 ```bash
-flutter run -d macos
+# Install dependencies
+flutter pub get
+
+# Run on desktop
+flutter run -d windows   # or macos / linux
 ```
 
-### Linux
+---
 
-```bash
-flutter run -d linux
-```
+## Supported Dump Formats
 
-### Build for Release
+| Format | Extensions |
+|--------|-----------|
+| Raw memory | `.raw`, `.mem`, `.bin` |
+| Windows Crash Dump | `.dmp` |
+| Windows Hibernation | `hiberfil.sys` |
+| ELF Core | `.core` |
+| LiME | `.lime` |
+| VMware | `.vmem`, `.vmss` |
+| VirtualBox | `.elf` |
 
-**Windows**:
-```bash
-flutter build windows --release
-```
-
-**macOS**:
-```bash
-flutter build macos --release
-```
-
-**Linux**:
-```bash
-flutter build linux --release
-```
-
-## Usage
-
-1. **Launch the application** - The dashboard opens with a centered upload card
-2. **Upload a file** - Choose one of two methods:
-   - **Drag & Drop**: Drag a memory dump file onto the drop zone (the zone highlights on hover)
-   - **Browse**: Click "Browse Dump File" button to open a native file picker
-3. **File Selection**: After selecting a file, the app displays:
-   - File name
-   - Full file path
-   - Option to select a different file
-
-## Supported File Formats
-
-- `.raw` - Raw memory dump
-- `.mem` - Memory dump file
-- `.vmem` - Virtual machine memory dump
-- `.bin` - Binary memory dump
-
-## Dependencies
-
-- **file_picker** (^8.1.0): Native file picker for desktop platforms
-- **desktop_drop** (^0.4.4): Drag & drop support for desktop
-- **flutter**: Core Flutter framework
-- **cupertino_icons**: Icon set
-
-## Architecture
-
-### DashboardScreen (StatefulWidget)
-Main dashboard screen managing:
-- File selection state
-- Hover state for drag-and-drop
-- UI rendering and user interactions
-
-### Key Methods
-
-- `_pickFile()`: Opens native file picker dialog
-- `_onFileSelected()`: Callback when file is selected (placeholder for backend integration)
-- `_buildUploadCard()`: Renders the drag-and-drop upload area
-- `_buildSelectedFileInfo()`: Displays selected file information
-
-## Future Integration
-
-The application includes TODO comments for backend integration:
-- `_onFileSelected()` in `main.dart` - This is where you'll connect to the Flask backend API
-- File upload logic will be implemented here
-
-## Color Scheme
-
-- **Primary Blue**: `#2563EB` - Main accent color
-- **Success Green**: `#16A34A` - File selection confirmation
-- **Background**: `#F8FAFC` - Light slate background
-- **Text Dark**: `#1E293B` - Primary text
-- **Text Light**: `#64748B` - Secondary text
-
-## Notes
-
-- The application is **frontend-only** at this stage
-- No backend API calls are implemented yet
-- File paths are logged to console for debugging
-- All UI is responsive and optimized for desktop screens
-
-## Troubleshooting
-
-### File picker not working
-- Ensure `file_picker` package is properly installed: `flutter pub get`
-- Check that the platform-specific permissions are configured
-
-### Drag-and-drop not working
-- Verify `desktop_drop` package is installed
-- Ensure the app window has focus when dragging files
-
-### Build errors
-- Run `flutter clean` and then `flutter pub get`
-- Check that your Flutter SDK is up to date: `flutter upgrade`
-
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
 ## License
-MIT License
->>>>>>> d6209ec05745d015038bd208ea65ab52fa355c85
 
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+MIT
