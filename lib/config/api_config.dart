@@ -5,7 +5,7 @@
 class ApiConfig {
   // Base URL for the backend API
   // TODO: Update this for production deployment
-  static const String baseUrl = 'http://localhost:5000';
+  static const String baseUrl = 'http://localhost:8888';
 
   // API endpoints
   static const String casesEndpoint = '$baseUrl/api/cases';

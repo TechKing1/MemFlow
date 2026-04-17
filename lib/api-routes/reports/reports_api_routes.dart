@@ -5,7 +5,7 @@ import 'dart:convert';
 /// Base URL for the backend API
 class ReportsApiRoutes {
   // Base URL - Update this with your actual backend URL
-  static const String baseUrl = 'http://localhost:5000/api/cases';
+  static const String baseUrl = 'http://localhost:8888/api/cases';
 
   /// Get analysis report for a case
   ///

@@ -9,7 +9,7 @@ import 'case_repository.get_status.dart' as get_status;
 import 'case_repository.get_report.dart' as get_report;
 
 class CaseRepository {
-  static const String _baseUrl = 'http://127.0.0.1:5000';
+  static const String _baseUrl = 'http://127.0.0.1:8888';
   final http.Client client;
 
   CaseRepository({http.Client? client}) : client = client ?? http.Client();

@@ -29,7 +29,7 @@
 
 class SettingsApiRoutes {
   // Placeholder - No endpoints available yet
-  static const String baseUrl = 'http://localhost:5000/settings';
+  static const String baseUrl = 'http://localhost:8888/settings';
 
   // TODO: Add API methods when backend endpoints are implemented
 }

@@ -6,7 +6,7 @@ import 'dart:convert';
 /// Base URL for the backend API
 class UploadApiRoutes {
   // Base URL - Update this with your actual backend URL
-  static const String baseUrl = 'http://localhost:5000/api/cases';
+  static const String baseUrl = 'http://localhost:8888/api/cases';
 
   /// Upload a memory dump file and create a new case
   ///

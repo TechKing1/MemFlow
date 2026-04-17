@@ -1,6 +1,6 @@
 from flask import Flask
 from config import Config
-from app.extensions import db, migrate
+from app.extensions import db, migrate, socketio
 
 def create_app():
     app = Flask(__name__)
@@ -11,7 +11,8 @@ def create_app():
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
-    
+    socketio.init_app(app)
+
     # Initialize Redis connection (imported for side effects - connection test)
     from app.extensions import redis_conn, task_queue
 
@@ -22,6 +23,9 @@ def create_app():
     # Register blueprints (API routes)
     from app.routes.cases import cases_bp
     app.register_blueprint(cases_bp, url_prefix="/api/cases")
+
+    from app.routes.notifications import notifications_bp
+    app.register_blueprint(notifications_bp, url_prefix="/api/notifications")
 
     return app
 

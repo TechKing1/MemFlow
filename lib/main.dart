@@ -6,17 +6,23 @@ import 'repositories/case_repository.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/dashboard/new_dashboard_screen.dart';
 import 'screens/help/help_screen.dart';
-import 'screens/operations/operations_screen.dart';
+
 import 'screens/reports/reports_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/upload/upload_case_screen.dart';
-import 'theme/app_theme.dart';
+import 'screens/notifications/notifications_screen.dart';
+import 'screens/case_view/case_view_screen.dart';
+
 import 'utils/page_transitions.dart';
+import 'view_models/notification_provider.dart';
 
 void main() {
   runApp(
     MultiProvider(
-      providers: [Provider(create: (_) => CaseRepository())],
+      providers: [
+        Provider(create: (_) => CaseRepository()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()),
+      ],
       child: const MyApp(),
     ),
   );
@@ -29,7 +35,6 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'MEMFLOW',
-      theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
       initialRoute: '/login',
       onGenerateRoute: (settings) {
@@ -55,21 +60,12 @@ class MyApp extends StatelessWidget {
           case '/help':
             page = const HelpScreen();
             return FadePageRoute(page: page);
-          case '/operations':
-            final args = settings.arguments as String?;
-            if (args == null) {
-              page = const Scaffold(
-                backgroundColor: Color(0xFF0A0E1A),
-                body: Center(
-                  child: Text(
-                    'Error: No case ID provided',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              );
-            } else {
-              page = OperationsScreen(caseId: args);
-            }
+          case '/notifications':
+            page = const NotificationsScreen();
+            return FadePageRoute(page: page);
+          case '/case-view':
+            final caseId = settings.arguments as int;
+            page = CaseViewScreen(caseId: caseId);
             return FadePageRoute(page: page);
           default:
             page = const Scaffold(

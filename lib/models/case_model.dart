@@ -37,6 +37,24 @@ class CaseModel extends Equatable {
     status,
     metadata,
   ];
+
+  CaseModel copyWith({
+    String? id,
+    String? name,
+    String? description,
+    DateTime? createdAt,
+    String? status,
+    Map<String, dynamic>? metadata,
+  }) {
+    return CaseModel(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      description: description ?? this.description,
+      createdAt: createdAt ?? this.createdAt,
+      status: status ?? this.status,
+      metadata: metadata ?? this.metadata,
+    );
+  }
 }
 
 class CaseStatus extends Equatable {

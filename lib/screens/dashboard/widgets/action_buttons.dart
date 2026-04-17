@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 class ActionButtons extends StatelessWidget {
-  const ActionButtons({Key? key}) : super(key: key);
+  final VoidCallback? onRefresh;
+
+  const ActionButtons({Key? key, this.onRefresh}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +51,23 @@ class ActionButtons extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+        // Refresh button beside Export JSON
+        Tooltip(
+          message: 'Refresh cases',
+          child: IconButton(
+            onPressed: onRefresh,
+            icon: const Icon(Icons.refresh_rounded),
+            color: const Color(0xFF94A3B8),
+            style: IconButton.styleFrom(
+              backgroundColor: const Color(0xFF1E293B),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: const BorderSide(color: Color(0xFF1E293B)),
+              ),
+              fixedSize: const Size(48, 48),
             ),
           ),
         ),

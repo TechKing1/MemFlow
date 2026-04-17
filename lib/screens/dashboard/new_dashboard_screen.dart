@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../widgets/common/app_sidebar.dart';
 import '../../widgets/common/app_top_bar.dart';
 import '../../api-routes/dashboard/dashboard_api_routes.dart';
 import '../../models/case_model.dart';
+import '../../view_models/notification_provider.dart';
 import 'widgets/stats_card.dart';
 import 'widgets/action_buttons.dart';
 import 'widgets/cases_table.dart';
@@ -24,6 +26,10 @@ class _NewDashboardScreenState extends State<NewDashboardScreen> {
   int _totalCases = 0;
   int _inProgressCases = 0;
   int _completedCases = 0;
+  int _threatsFound = 0;
+
+  // Stored reference so dispose() can safely removeListener without context
+  NotificationProvider? _notifProvider;
 
   // Search and filter state
   String _searchQuery = '';
@@ -38,6 +44,54 @@ class _NewDashboardScreenState extends State<NewDashboardScreen> {
   void initState() {
     super.initState();
     _fetchCases();
+
+    // Wire up real-time WebSocket updates after the first frame so context is ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _notifProvider = context.read<NotificationProvider>();
+      _notifProvider!.addListener(_onNotificationUpdate);
+    });
+  }
+
+  @override
+  void dispose() {
+    // Use stored reference — never read context in dispose()
+    _notifProvider?.removeListener(_onNotificationUpdate);
+    super.dispose();
+  }
+
+  /// Called every time NotificationProvider fires notifyListeners()
+  void _onNotificationUpdate() {
+    if (!mounted) return;
+    final provider = context.read<NotificationProvider>();
+    _applySocketUpdates(provider);
+  }
+
+  /// Update case rows in-place when a WebSocket status update arrives.
+  /// Also recalculates stats card counts and re-fetches from API for accuracy.
+  void _applySocketUpdates(NotificationProvider provider) {
+    if (provider.caseStatuses.isEmpty) return;
+    bool changed = false;
+    final updated = _cases.map((c) {
+      final newStatus = provider.caseStatuses[c.id];
+      if (newStatus != null && newStatus != c.status) {
+        changed = true;
+        return c.copyWith(status: newStatus);
+      }
+      return c;
+    }).toList();
+    if (changed) {
+      setState(() {
+        _cases = updated;
+        // Recalculate stats card counts from updated case list
+        _inProgressCases = updated
+            .where((c) => c.status == 'processing')
+            .length;
+        _completedCases = updated.where((c) => c.status == 'completed').length;
+      });
+      // Also re-fetch from API to get accurate total counts across all pages
+      _fetchCases();
+    }
   }
 
   Future<void> _fetchCases() async {
@@ -64,11 +118,21 @@ class _NewDashboardScreenState extends State<NewDashboardScreen> {
           .length;
       final completed = casesList.where((c) => c.status == 'completed').length;
 
+      // Sum threat counts from case metadata (populated by Rule Engine)
+      int threats = 0;
+      for (final c in casesList) {
+        final meta = c.metadata;
+        if (meta != null) {
+          threats += (meta['threats_found'] as num? ?? 0).toInt();
+        }
+      }
+
       setState(() {
         _cases = casesList;
         _totalCases = total;
         _inProgressCases = inProgress;
         _completedCases = completed;
+        _threatsFound = threats;
         _totalPages = (total / _itemsPerPage).ceil();
         _isLoading = false;
       });
@@ -104,7 +168,7 @@ class _NewDashboardScreenState extends State<NewDashboardScreen> {
                       children: [
                         _buildStatsCards(),
                         const SizedBox(height: 24),
-                        const ActionButtons(),
+                        ActionButtons(onRefresh: _fetchCases),
                         const SizedBox(height: 24),
                         _buildSearchAndFilter(),
                         const SizedBox(height: 16),
@@ -154,13 +218,17 @@ class _NewDashboardScreenState extends State<NewDashboardScreen> {
           ),
         ),
         const SizedBox(width: 16),
-        const Expanded(
+        Expanded(
           child: StatsCard(
             title: 'Threats Found',
-            value: '0',
-            subtitle: 'Analysis pending',
+            value: _isLoading ? '...' : _threatsFound.toString(),
+            subtitle: _isLoading
+                ? ''
+                : _threatsFound == 0
+                    ? 'No threats detected'
+                    : '$_threatsFound alert${_threatsFound > 1 ? 's' : ''} detected',
             icon: Icons.warning_amber_outlined,
-            color: Color(0xFFEF4444),
+            color: const Color(0xFFEF4444),
           ),
         ),
       ],

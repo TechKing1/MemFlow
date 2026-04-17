@@ -43,3 +43,45 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ── Python / Backend ────────────────────────────────────────────────────────
+
+# Virtual environment — NEVER commit this (contains symlinks that break Git on Windows)
+BackEnd/venv/
+venv/
+.venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment variables (contains secrets like DB passwords, API keys)
+BackEnd/.env
+.env
+
+# Flask / SQLAlchemy database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Memory Forensics Data ───────────────────────────────────────────────────
+
+# Raw memory dump files — binary files, often gigabytes in size
+*.mem
+*.dmp
+*.raw
+*.vmem
+*.lime
+
+# Generated analysis reports (these are outputs, not source code)
+BackEnd/data/cases/*/report.json
+
+# Volatility symbol files
+BackEnd/symbols/
+
+# ── Misc ────────────────────────────────────────────────────────────────────
+
+# Python egg / dist
+*.egg-info/
+dist/

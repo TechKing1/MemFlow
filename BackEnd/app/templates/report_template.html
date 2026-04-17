@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MEMFLOW Report — {{ case_name }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background: #0A0E1A;
+            color: #E2E8F0;
+            padding: 40px;
+            line-height: 1.6;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+
+        /* Header */
+        .header {
+            border-bottom: 2px solid #00D9FF;
+            padding-bottom: 24px;
+            margin-bottom: 32px;
+        }
+        .header h1 {
+            font-size: 28px;
+            color: #00D9FF;
+            margin-bottom: 4px;
+        }
+        .header .subtitle {
+            color: #64748B;
+            font-size: 14px;
+        }
+        .header .case-name {
+            font-size: 20px;
+            color: #FFFFFF;
+            margin-top: 12px;
+        }
+
+        /* Section */
+        .section {
+            background: #0F1419;
+            border: 1px solid #1E293B;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .section h2 {
+            font-size: 16px;
+            color: #00D9FF;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Key-Value rows */
+        .kv-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #1E293B;
+        }
+        .kv-row:last-child { border-bottom: none; }
+        .kv-label { color: #94A3B8; font-size: 14px; }
+        .kv-value { color: #FFFFFF; font-size: 14px; font-weight: 500; text-align: right; }
+
+        /* Badge */
+        .badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-green { background: rgba(16,185,129,0.15); color: #10B981; }
+        .badge-blue { background: rgba(59,130,246,0.15); color: #3B82F6; }
+        .badge-red { background: rgba(239,68,68,0.15); color: #EF4444; }
+        .badge-yellow { background: rgba(245,158,11,0.15); color: #F59E0B; }
+
+        /* Hash */
+        .hash {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            color: #94A3B8;
+            word-break: break-all;
+            background: #1E293B;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-top: 4px;
+        }
+
+        /* Evidence list */
+        .evidence-list { list-style: none; padding: 0; }
+        .evidence-list li {
+            padding: 6px 0 6px 16px;
+            position: relative;
+            font-size: 13px;
+            color: #94A3B8;
+        }
+        .evidence-list li::before {
+            content: '›';
+            position: absolute;
+            left: 0;
+            color: #00D9FF;
+            font-weight: bold;
+        }
+
+        /* Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+        th {
+            text-align: left;
+            padding: 8px 12px;
+            background: #1E293B;
+            color: #94A3B8;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #1E293B;
+            font-size: 13px;
+        }
+        tr:last-child td { border-bottom: none; }
+
+        /* Confidence bar */
+        .confidence-bar {
+            width: 100%;
+            height: 8px;
+            background: #1E293B;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        .confidence-fill {
+            height: 100%;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #00D9FF, #3B82F6);
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            color: #475569;
+            font-size: 12px;
+            margin-top: 32px;
+            padding-top: 16px;
+            border-top: 1px solid #1E293B;
+        }
+
+        @media print {
+            body { background: white; color: #1a1a1a; padding: 20px; }
+            .section { border-color: #ddd; }
+            .kv-row { border-color: #eee; }
+            .header { border-color: #0066cc; }
+            .header h1 { color: #0066cc; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🛡 MEMFLOW</h1>
+            <div class="subtitle">Memory Forensics Analysis Report</div>
+            <div class="case-name">{{ case_name }}</div>
+            <div class="subtitle" style="margin-top: 4px;">Generated: {{ generated_at }}</div>
+        </div>
+
+        <!-- Analysis Metadata -->
+        <div class="section">
+            <h2>📋 Analysis Metadata</h2>
+            <div class="kv-row">
+                <span class="kv-label">Analyzer</span>
+                <span class="kv-value">{{ analyzer }}</span>
+            </div>
+            <div class="kv-row">
+                <span class="kv-label">Analysis Date</span>
+                <span class="kv-value">{{ analysis_date }}</span>
+            </div>
+            <div class="kv-row">
+                <span class="kv-label">Plugin Level</span>
+                <span class="kv-value"><span class="badge badge-blue">{{ plugin_level }}</span></span>
+            </div>
+            <div class="kv-row">
+                <span class="kv-label">Plugins Executed</span>
+                <span class="kv-value">{{ plugins_executed }}</span>
+            </div>
+            <div class="kv-row">
+                <span class="kv-label">Plugins Successful</span>
+                <span class="kv-value">{{ plugins_successful }}</span>
+            </div>
+        </div>
+
+        <!-- File Information -->
+        <div class="section">
+            <h2>📁 File Information</h2>
+            <div class="kv-row">
+                <span class="kv-label">File Size</span>
+                <span class="kv-value">{{ file_size }}</span>
+            </div>
+            <div class="kv-row">
+                <span class="kv-label">Format</span>
+                <span class="kv-value">{{ file_format | upper }} ({{ format_confidence }}% confidence)</span>
+            </div>
+            {% if hashes %}
+            <div style="margin-top: 12px;">
+                {% if hashes.md5 %}
+                <div class="kv-row">
+                    <span class="kv-label">MD5</span>
+                    <span class="hash">{{ hashes.md5 }}</span>
+                </div>
+                {% endif %}
+                {% if hashes.sha1 %}
+                <div class="kv-row">
+                    <span class="kv-label">SHA1</span>
+                    <span class="hash">{{ hashes.sha1 }}</span>
+                </div>
+                {% endif %}
+                {% if hashes.sha256 %}
+                <div class="kv-row">
+                    <span class="kv-label">SHA256</span>
+                    <span class="hash">{{ hashes.sha256 }}</span>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- OS Detection -->
+        <div class="section">
+            <h2>🖥 OS Detection</h2>
+            <div class="kv-row">
+                <span class="kv-label">Operating System</span>
+                <span class="kv-value"><span class="badge badge-green">{{ os_name }}</span></span>
+            </div>
+            <div class="kv-row">
+                <span class="kv-label">Confidence</span>
+                <span class="kv-value">{{ os_confidence }}% — {{ os_confidence_level }}</span>
+            </div>
+            <div class="confidence-bar">
+                <div class="confidence-fill" style="width: {{ os_confidence }}%;"></div>
+            </div>
+            <div class="kv-row" style="margin-top: 8px;">
+                <span class="kv-label">Detection Method</span>
+                <span class="kv-value">{{ os_method }}</span>
+            </div>
+            {% if os_evidence %}
+            <div style="margin-top: 12px;">
+                <span class="kv-label">Evidence:</span>
+                <ul class="evidence-list">
+                    {% for ev in os_evidence %}
+                    <li>{{ ev }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Process Analysis -->
+        <div class="section">
+            <h2>⚙ Process Analysis</h2>
+            {% if process_detected %}
+            <div class="kv-row">
+                <span class="kv-label">Processes Found</span>
+                <span class="kv-value"><span class="badge badge-green">{{ process_count }}</span></span>
+            </div>
+            {% else %}
+            <div class="kv-row">
+                <span class="kv-label">Status</span>
+                <span class="kv-value"><span class="badge badge-yellow">Not detected</span></span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Network Analysis -->
+        <div class="section">
+            <h2>🌐 Network Analysis</h2>
+            {% if network_detected %}
+            <div class="kv-row">
+                <span class="kv-label">Connections Found</span>
+                <span class="kv-value"><span class="badge badge-green">{{ network_count }}</span></span>
+            </div>
+            {% else %}
+            <div class="kv-row">
+                <span class="kv-label">Status</span>
+                <span class="kv-value"><span class="badge badge-yellow">Not detected</span></span>
+            </div>
+            {% if network_failure %}
+            <div class="kv-row">
+                <span class="kv-label">Reason</span>
+                <span class="kv-value" style="color: #F59E0B;">{{ network_failure }}</span>
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+
+        <!-- Performance -->
+        <div class="section">
+            <h2>⏱ Performance</h2>
+            <div class="kv-row">
+                <span class="kv-label">Total Analysis Time</span>
+                <span class="kv-value">{{ total_time }}</span>
+            </div>
+            {% if stages %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Stage</th>
+                        <th style="text-align: right;">Time (seconds)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stage in stages %}
+                    <tr>
+                        <td>{{ stage.name }}</td>
+                        <td style="text-align: right;">{{ stage.seconds }}s</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+
+        <!-- Plugin Results -->
+        {% if plugin_failures %}
+        <div class="section">
+            <h2>🔌 Plugin Results</h2>
+            <div class="kv-row">
+                <span class="kv-label">Total Plugins</span>
+                <span class="kv-value">{{ plugins_total }}</span>
+            </div>
+            <div class="kv-row">
+                <span class="kv-label">Successful</span>
+                <span class="kv-value"><span class="badge badge-green">{{ plugins_success }}</span></span>
+            </div>
+            <div class="kv-row">
+                <span class="kv-label">Failed</span>
+                <span class="kv-value"><span class="badge badge-red">{{ plugins_failed }}</span></span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Plugin</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for plugin, error in plugin_failures.items() %}
+                    <tr>
+                        <td style="color: #EF4444;">{{ plugin }}</td>
+                        <td style="color: #94A3B8;">{{ error }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <div class="footer">
+            MEMFLOW Memory Forensics Platform • Report generated automatically
+        </div>
+    </div>
+</body>
+</html>

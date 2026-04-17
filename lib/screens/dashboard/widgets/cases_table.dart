@@ -23,7 +23,7 @@ class CasesTable extends StatelessWidget {
           _buildTableHeader(),
           const Divider(color: Color(0xFF1E293B), height: 1),
           // Table rows
-          ...cases.map((caseModel) => _buildCaseRow(caseModel)),
+          ...cases.map((caseModel) => _buildCaseRow(context, caseModel)),
         ],
       ),
     );
@@ -105,7 +105,7 @@ class CasesTable extends StatelessWidget {
     );
   }
 
-  Widget _buildCaseRow(CaseModel caseModel) {
+  Widget _buildCaseRow(BuildContext context, CaseModel caseModel) {
     // Determine status color
     Color statusColor;
     switch (caseModel.status.toLowerCase()) {
@@ -197,9 +197,15 @@ class CasesTable extends StatelessWidget {
             child: Wrap(
               spacing: 8,
               children: [
-                _buildActionButton(Icons.visibility_outlined, 'View'),
-                _buildActionButton(Icons.download_outlined, 'Download'),
-                _buildActionButton(Icons.delete_outline, 'Delete'),
+                _buildActionButton(Icons.visibility_outlined, 'View', () {
+                  Navigator.pushNamed(
+                    context,
+                    '/case-view',
+                    arguments: int.parse(caseModel.id),
+                  );
+                }),
+                _buildActionButton(Icons.download_outlined, 'Download', () {}),
+                _buildActionButton(Icons.delete_outline, 'Delete', () {}),
               ],
             ),
           ),
@@ -208,11 +214,15 @@ class CasesTable extends StatelessWidget {
     );
   }
 
-  Widget _buildActionButton(IconData icon, String tooltip) {
+  Widget _buildActionButton(
+    IconData icon,
+    String tooltip,
+    VoidCallback? onTap,
+  ) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        onTap: () {},
+        onTap: onTap,
         borderRadius: BorderRadius.circular(4),
         child: Container(
           padding: const EdgeInsets.all(6),
