@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -28,3 +29,16 @@ class Config:
     
     # RQ Queue name for forensics analysis
     RQ_QUEUE_NAME = os.getenv("RQ_QUEUE_NAME", "forensics_analysis")
+
+    # ── JWT Authentication ──────────────────────────────────────────────────
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "memflow-change-this-secret-in-production")
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)    # Short-lived access token
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)   # Long-lived refresh token
+    JWT_TOKEN_LOCATION = ["headers"]
+    JWT_HEADER_NAME = "Authorization"
+    JWT_HEADER_TYPE = "Bearer"
+
+    # ── Admin Registration ──────────────────────────────────────────────────
+    # Secret code required when registering as admin.
+    # Set ADMIN_CODE env var to change it. Keep this secret!
+    ADMIN_REGISTRATION_CODE = os.getenv("ADMIN_CODE", "MEMFLOW@Admin2026!")
